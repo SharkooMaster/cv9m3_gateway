@@ -1,16 +1,16 @@
 # Use the official ASP.NET Core runtime as a parent image
-FROM mcr.microsoft.com/dotnet/aspnet:7.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
 EXPOSE 80
 EXPOSE 443
 
 # Use the SDK image for building the app
-FROM mcr.microsoft.com/dotnet/sdk:7.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 # Copy the csproj and restore as distinct layers
-COPY ["gateway/gateway.csproj", "gateway/"]
-RUN dotnet restore "gateway/gateway.csproj"
+COPY ["./gateway.csproj", "gateway/"]
+RUN dotnet restore "./gateway.csproj"
 
 # Copy the rest of the application source code
 COPY . .
