@@ -3,9 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.002.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "gateway", "gateway\gateway.csproj", "{D393FF24-9B3A-41AE-B680-6DCCEB357FEF}"
-EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "agent", "agent\agent.csproj", "{B43E9683-101E-4B7E-9D5E-B3B6C4BA224D}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "gateway", "gateway.csproj", "{9220F916-6D0C-4ED1-A920-62A716915D65}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -13,14 +11,10 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{D393FF24-9B3A-41AE-B680-6DCCEB357FEF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{D393FF24-9B3A-41AE-B680-6DCCEB357FEF}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{D393FF24-9B3A-41AE-B680-6DCCEB357FEF}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{D393FF24-9B3A-41AE-B680-6DCCEB357FEF}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B43E9683-101E-4B7E-9D5E-B3B6C4BA224D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B43E9683-101E-4B7E-9D5E-B3B6C4BA224D}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B43E9683-101E-4B7E-9D5E-B3B6C4BA224D}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B43E9683-101E-4B7E-9D5E-B3B6C4BA224D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9220F916-6D0C-4ED1-A920-62A716915D65}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9220F916-6D0C-4ED1-A920-62A716915D65}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9220F916-6D0C-4ED1-A920-62A716915D65}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9220F916-6D0C-4ED1-A920-62A716915D65}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
