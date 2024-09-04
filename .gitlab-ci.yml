@@ -48,8 +48,8 @@ deploy:
   script:
     - echo "Triggering shared deployment pipeline"
     - |
-      curl -v -X POST \
-        -F token=$CI_JOB_TOKEN \
+      curl -X POST \
+        -F token=$DEPLOY_TRIGGER_TOKEN \
         -F ref=main \
         -F "variables[IMAGE_TAG]=$CI_COMMIT_SHA" \
         https://gitlab.com/api/v4/projects/$SHARED_DEPLOYMENT_PROJECT_ID/trigger/pipeline
