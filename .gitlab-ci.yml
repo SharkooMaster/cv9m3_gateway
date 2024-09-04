@@ -47,11 +47,6 @@ deploy:
   stage: deploy
   script:
     - echo "Triggering shared deployment pipeline"
-    - |
-      curl -X POST \
-        -F token=$CI_JOB_TOKEN \
-        -F ref=main \
-        -F "variables[IMAGE_TAG]=$CI_COMMIT_SHA" \
-        https://gitlab.com/api/v4/projects/$SHARED_DEPLOYMENT_PROJECT_ID/trigger/pipeline
+    - curl --request POST --form "token=$CI_JOB_TOKEN" -F "variables[IMAGE_TAG]=$CI_COMMIT_SHA" --form ref=main "https://gitlab.example.com/api/v4/projects/$SHARED_DEPLOYMENT_PROJECT_ID/trigger/pipeline"
   only:
     - main
