@@ -2,18 +2,18 @@
 stages:
   - test
   - build
-  - deploy
+  - push
 
 # Test Stage
 test:
   stage: test
-  image: mcr.microsoft.com/dotnet/sdk:6.0
+  image: mcr.microsoft.com/dotnet/sdk:8.0
   script:
-    - dotnet restore
-    - dotnet build
-    - dotnet test
+    - dotnet restore Gateway.Tests/Gateway.Tests.csproj
+    - dotnet build Gateway.Tests/Gateway.Tests.csproj
+    - dotnet test Gateway.Tests/Gateway.Tests.csproj
   only:
-    - main
+    - dev
 
 # Build Stage
 build:
@@ -21,8 +21,10 @@ build:
   image: docker:latest
   services:
     - docker:dind
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
   script:
-    - docker build -t registry.gitlab.com/your-project/$CI_PROJECT_NAME:latest .
-    - docker push registry.gitlab.com/your-project/$CI_PROJECT_NAME:latest
+    - docker build -t registry.gitlab.com/tpvdb/tpvdb/gateway .
+    - docker push registry.gitlab.com/tpvdb/tpvdb/gateway
   only:
-    - main
+    - dev

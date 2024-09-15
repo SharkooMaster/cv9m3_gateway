@@ -1,20 +1,16 @@
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-env
 WORKDIR /app
-EXPOSE 80
-EXPOSE 443
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
-COPY ["gateway.csproj", "./"]
-RUN dotnet restore "gateway.csproj"
-COPY . .
-WORKDIR "/src"
-RUN dotnet build "gateway.csproj" -c Release -o /app/build
+COPY gateway.csproj ./
+RUN dotnet restore gateway.csproj
 
-FROM build AS publish
-RUN dotnet publish "gateway.csproj" -c Release -o /app/publish
+COPY . ./
+RUN dotnet publish gateway.csproj -c Release -o out
 
-FROM base AS final
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
-COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "gateway.dll"]
+
+COPY --from=build-env /app/out .
+
+EXPOSE 5000 5001
+ENTRYPOINT [ "dotnet". "gateway.dll" ]
