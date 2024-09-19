@@ -13,4 +13,4 @@ WORKDIR /app
 COPY --from=build-env /app/out .
 
 EXPOSE 5000 5001
-ENTRYPOINT [ "dotnet". "gateway.dll" ]
+ENTRYPOINT [ "dotnet", "gateway.dll" ]
