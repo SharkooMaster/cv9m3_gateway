@@ -3,6 +3,7 @@ stages:
   - test
   - build
   - push
+  - deploy
 
 # Test Stage
 test:
@@ -29,4 +30,21 @@ build:
   only:
     - dev
 
-# trigger deploy later
+push_image:
+  stage: push
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+  script:
+    - docker push registry.gitlab.com/tpvdb/tpvdb/gateway:latest
+  only:
+    - dev
+
+deploy:
+  stage: deploy
+  script:
+    - kubectl get pods
+  only:
+    - dev
