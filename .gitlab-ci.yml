@@ -33,8 +33,7 @@ deploy:
   stage: deploy
   script:
     - echo "User $(whoami)"
-    - which kubectl
-    - kubectl version --client
     - kubectl get pods
+    - kubectl set image deployment/gateway-deployment gateway-container=registry.gitlab.com/tpvdb/tpvdb/gateway --record
   only:
     - dev
