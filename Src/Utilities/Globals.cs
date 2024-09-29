@@ -1,0 +1,13 @@
+using Gateway.Models;
+namespace Gateway.Utils.Globals;
+
+public static class Globals
+{
+    // ETCD_CONFIG
+    public static string ETCD_ID = "";
+    public static string ETCD_VALUE = "";
+    public static long ETCD_LEASE_ID = -1;
+
+    // AGENTS_CONFIG
+    public static Dictionary<string, M_Agent> AGENTS = new Dictionary<string, M_Agent>();
+}
