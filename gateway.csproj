@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <Protobuf Include="Protos\greet.proto" GrpcServices="Server" />
+    <Protobuf Include="Protos\Client\BatchSearch.proto" GrpcServices="Server" />
   </ItemGroup>
 
   <PropertyGroup>
