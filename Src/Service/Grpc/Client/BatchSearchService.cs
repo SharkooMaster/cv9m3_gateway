@@ -1,13 +1,20 @@
 using Grpc.Core;
+using GatewayClientServices;
+using TpInternalService;
 
 namespace Gateway.Services.Grpc;
 
-public class BatchSearchService
+public class BatchSearchService : Client_BatchSearchService.Client_BatchSearchServiceBase
 {
-    private readonly ILogger<GreeterService> _logger;
+    private readonly ILogger<BatchSearchService> _logger;
 
-    public BatchSearchService(ILogger<GreeterService> logger)
+    public BatchSearchService(ILogger<BatchSearchService> logger)
     {
         _logger = logger;
+    }
+
+    public override Task<ByteArrayResponse> ProcessBytes(ByteArrayRequest request, ServerCallContext context)
+    {
+        return base.ProcessBytes(request, context);
     }
 }

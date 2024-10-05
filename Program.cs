@@ -41,6 +41,8 @@ if (app.Environment.IsDevelopment())
 app.UseRouting();
 
 app.MapGrpcService<GreeterService>();
+app.MapGrpcService<BatchSearchService>();
+
 app.MapGet("/", () =>
 {
     return "Hello world";
