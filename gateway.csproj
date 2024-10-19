@@ -27,6 +27,10 @@
 
   <ItemGroup>
     <Protobuf Include="Protos\greet.proto" GrpcServices="Server" />
+    <Protobuf Include="Protos\Client\BatchSearch.proto" GrpcServices="Server" />
+
+    <Protobuf Include="Protos\Internal\QueryAgent.proto" GrpcServices="Client" />
+    <Protobuf Include="Protos\Internal\StoreBucketRowAgent.proto" GrpcServices="Client" />
   </ItemGroup>
 
   <PropertyGroup>

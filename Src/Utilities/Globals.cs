@@ -9,5 +9,5 @@ public static class Globals
     public static long ETCD_LEASE_ID = -1;
 
     // AGENTS_CONFIG
-    public static Dictionary<string, M_Agent> AGENTS = new Dictionary<string, M_Agent>();
+    public static string AgentsLoadbalancer = "http://agent-loadbalancer.default.svc.cluster.local:5000";
 }

@@ -7,6 +7,7 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Logging;
+using Gateway.Services.Grpc;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,6 +41,8 @@ if (app.Environment.IsDevelopment())
 app.UseRouting();
 
 app.MapGrpcService<GreeterService>();
+app.MapGrpcService<BatchSearchService>();
+
 app.MapGet("/", () =>
 {
     return "Hello world";
