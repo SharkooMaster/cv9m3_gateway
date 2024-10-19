@@ -26,7 +26,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 // Background services
-builder.Services.AddHostedService<GatewayLifeCycleService>();
+// builder.Services.AddHostedService<GatewayLifeCycleService>();
 //builder.Services.AddHostedService<GatewayRuntimeService>();
 
 var app = builder.Build();
@@ -52,17 +52,4 @@ app.Run();
 
 void ConfigureServices(IServiceCollection services)
 {
-    Console.WriteLine("Initiating iEtcd");
-
-    services.AddSingleton<EtcdClient>(provider => {
-        var configuration = provider.GetRequiredService<IConfiguration>();
-        var etcdUrl = configuration["Etcd:Url"];
-		Console.WriteLine($"etcd_url: {etcdUrl}");
-
-		return new EtcdClient(etcdUrl, configureChannelOptions: (options => {
-            options.Credentials = ChannelCredentials.Insecure;
-        }));
-    });
-    services.AddSingleton<IEtcdClientService, EtcdClientService>();
-	Console.WriteLine("Connected iEtcd");
 }
