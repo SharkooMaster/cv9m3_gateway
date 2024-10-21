@@ -2,12 +2,13 @@ using System.Net;
 using System.Net.Security;
 using Gateway.Services;
 using Gateway.Services.Etcd;
+using Gateway.Services.Grpc;
 using dotnet_etcd;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Logging;
-using Gateway.Services.Grpc;
+using Agent.Services.Grpc;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,7 +28,7 @@ builder.Services.AddSwaggerGen();
 
 // Background services
 // builder.Services.AddHostedService<GatewayLifeCycleService>();
-//builder.Services.AddHostedService<GatewayRuntimeService>();
+// builder.Services.AddHostedService<GatewayRuntimeService>();
 
 var app = builder.Build();
 
@@ -52,4 +53,6 @@ app.Run();
 
 void ConfigureServices(IServiceCollection services)
 {
+    services.AddSingleton<QueryAgentService>();
+    services.AddSingleton<StoreBucketRowAgentService>();
 }

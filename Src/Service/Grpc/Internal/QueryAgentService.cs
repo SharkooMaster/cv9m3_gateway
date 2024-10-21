@@ -7,8 +7,8 @@ namespace Agent.Services.Grpc;
 public class QueryAgentService
 {
     private readonly QueryAgent.QueryAgentClient _client;
-
     private readonly ILogger<QueryAgentService> _logger;
+
     public QueryAgentService(ILogger<QueryAgentService> logger)
     {
         _logger = logger;
