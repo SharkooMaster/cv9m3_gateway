@@ -1,6 +1,8 @@
 using Grpc.Core;
 using GatewayClientServices;
 using TpInternalService;
+using Grpc.Net.Client;
+using Gateway.Utils.Globals;
 
 namespace Gateway.Services.Grpc;
 
@@ -15,6 +17,6 @@ public class BatchSearchService : Client_BatchSearchService.Client_BatchSearchSe
 
     public override Task<ByteArrayResponse> ProcessBytes(ByteArrayRequest request, ServerCallContext context)
     {
-        return base.ProcessBytes(request, context);
+        return null;
     }
 }
