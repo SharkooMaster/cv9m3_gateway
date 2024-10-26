@@ -17,5 +17,6 @@ public class BatchSearchService : Client_BatchSearchService.Client_BatchSearchSe
 
     public override Task<ByteArrayResponse> ProcessBytes(ByteArrayRequest request, ServerCallContext context)
     {
+        return null;
     }
 }
