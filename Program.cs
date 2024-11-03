@@ -17,7 +17,6 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddGrpc();
 
 ConfigureServices(builder.Services);
-AgnetaHandler.Log(0, "STARTUP->Configured required services.");
 
 // Configure Kestrel to allow HTTP/2 without TLS
 builder.WebHost.ConfigureKestrel(options =>
@@ -46,7 +45,6 @@ app.UseRouting();
 
 app.MapGrpcService<GreeterService>();
 app.MapGrpcService<BatchSearchService>();
-AgnetaHandler.Log(0, "STARTUP->Mapped GRPC services.");
 
 app.MapGet("/", () =>
 {
