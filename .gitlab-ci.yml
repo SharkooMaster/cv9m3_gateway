@@ -35,5 +35,6 @@ deploy:
     - echo "User $(whoami)"
     - kubectl get pods
     - kubectl set image deployment/gateway-deployment gateway=registry.gitlab.com/tpvdb/tpvdb/gateway --record
+    - kubectl rollout restart deployment gateway.deployment
   only:
     - dev

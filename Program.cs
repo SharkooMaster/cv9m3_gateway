@@ -9,12 +9,15 @@ using Grpc.Net.Client;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Logging;
 using Agent.Services.Grpc;
+using Gateway.Services.Agneta;
+using Gateway.Modules.Agneta;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddGrpc();
 
 ConfigureServices(builder.Services);
+AgnetaHandler.Log(0, "STARTUP->Configured required services.");
 
 // Configure Kestrel to allow HTTP/2 without TLS
 builder.WebHost.ConfigureKestrel(options =>
@@ -43,6 +46,7 @@ app.UseRouting();
 
 app.MapGrpcService<GreeterService>();
 app.MapGrpcService<BatchSearchService>();
+AgnetaHandler.Log(0, "STARTUP->Mapped GRPC services.");
 
 app.MapGet("/", () =>
 {
@@ -50,9 +54,11 @@ app.MapGet("/", () =>
 });
 
 app.Run();
+AgnetaHandler.Log(0, "STARTUP->Server is running.");
 
 void ConfigureServices(IServiceCollection services)
 {
+    services.AddSingleton(new AgnetaClientService("https://agneta-loadbalancer.default.svc.cluster.local/log/ws"));
     services.AddSingleton<QueryAgentService>();
     services.AddSingleton<StoreBucketRowAgentService>();
 }
