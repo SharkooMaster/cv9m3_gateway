@@ -56,7 +56,7 @@ AgnetaHandler.Log(0, "STARTUP->Server is running.");
 
 void ConfigureServices(IServiceCollection services)
 {
-    services.AddSingleton(new AgnetaClientService("https://agneta-loadbalancer.default.svc.cluster.local/log/ws"));
+    services.AddSingleton<AgnetaClientService>(new AgnetaClientService("https://agneta-loadbalancer.default.svc.cluster.local/log/ws"));
     services.AddSingleton<QueryAgentService>();
     services.AddSingleton<StoreBucketRowAgentService>();
 }
