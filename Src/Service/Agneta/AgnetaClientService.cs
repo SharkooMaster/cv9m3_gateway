@@ -16,6 +16,7 @@ public class AgnetaClientService : IAgnetaClientService
     
     public async Task ConnectAsync()
     {
+        _client.Options.RemoteCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) => true;
         if(_client.State != WebSocketState.Open)
         {
             await _client.ConnectAsync(_uri, CancellationToken.None);

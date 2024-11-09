@@ -16,9 +16,10 @@ public class BatchSearchService : Client_BatchSearchService.Client_BatchSearchSe
         _logger = logger;
     }
 
-    public override Task<ByteArrayResponse> ProcessBytes(ByteArrayRequest request, ServerCallContext context)
+    public override async Task<ByteArrayResponse> ProcessBytes(ByteArrayRequest request, ServerCallContext context)
     {
-        AgnetaHandler.Log(0, "Recieved request to BatchSearch");
+        Console.WriteLine("here");
+        await AgnetaHandler.Log(0, "Recieved request to BatchSearch");
         return null;
     }
 }

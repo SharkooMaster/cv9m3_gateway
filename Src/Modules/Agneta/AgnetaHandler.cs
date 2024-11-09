@@ -22,11 +22,18 @@ public class LogMessage
 
 public static class AgnetaHandler
 {
-    private static AgnetaClientService acs { get; set; }
+    private static AgnetaClientService _instance;
+
+    public static AgnetaClientService Instance => _instance ?? throw new InvalidOperationException("AgnetaClientService not initialized.");
+
+    public static void SetInstance(AgnetaClientService instance)
+    {
+        _instance = instance ?? throw new ArgumentNullException(nameof(instance));
+    }
 
     public static async Task Log(int _level, string _message)
     {
-        if(acs != null)
+        if(_instance != null)
         {
             LogMessage _log = new LogMessage();
             _log.ClientKey = Globals.ETCD_ID;
@@ -34,7 +41,7 @@ public static class AgnetaHandler
             _log.LogLevel = _level;
             _log.LogMessageText = _message;
 
-            await acs.SendMessageAsync(JsonConvert.SerializeObject(_log));
+            await _instance.SendMessageAsync(JsonConvert.SerializeObject(_log));
             Console.WriteLine("Sent a message");
         }
         else
