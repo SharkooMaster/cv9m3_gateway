@@ -13,4 +13,4 @@ WORKDIR /app
 COPY --from=build-env /app/out .
 
 EXPOSE 8100 8101
-ENTRYPOINT [ "dotnet", "gateway.dll" ]
+ENTRYPOINT [ "dotnet", "gateway.dll", "--urls", "'http://0.0.0.0:8100'" ]
