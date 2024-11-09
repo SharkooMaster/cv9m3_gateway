@@ -60,8 +60,8 @@ app.Run();
 
 void ConfigureServices(IServiceCollection services)
 {
-    //services.AddSingleton<AgnetaClientService>(new AgnetaClientService("https://agneta-loadbalancer.default.svc.cluster.local/log/ws"));
-    services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://localhost:8080/log/ws"));
+    services.AddSingleton<AgnetaClientService>(new AgnetaClientService("https://agneta-loadbalancer.default.svc.cluster.local/log/ws"));
+    //services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://localhost:8080/log/ws"));
     services.AddSingleton<QueryAgentService>();
     services.AddSingleton<StoreBucketRowAgentService>();
 }
