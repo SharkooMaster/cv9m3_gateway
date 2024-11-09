@@ -36,7 +36,7 @@ builder.Services.AddSwaggerGen();
 var app = builder.Build();
 
 var agnetaClientService = app.Services.GetRequiredService<AgnetaClientService>();
-//await agnetaClientService.ConnectAsync();
+await agnetaClientService.ConnectAsync();
 AgnetaHandler.SetInstance(agnetaClientService);
 
 if (app.Environment.IsDevelopment())
