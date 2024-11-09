@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using Agent.Services.Grpc;
 using Gateway.Services.Agneta;
 using Gateway.Modules.Agneta;
+using System.Buffers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -34,6 +35,10 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+var agnetaClientService = app.Services.GetRequiredService<AgnetaClientService>();
+await agnetaClientService.ConnectAsync();
+AgnetaHandler.SetInstance(agnetaClientService);
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -52,11 +57,11 @@ app.MapGet("/", () =>
 });
 
 app.Run();
-AgnetaHandler.Log(0, "STARTUP->Server is running.");
 
 void ConfigureServices(IServiceCollection services)
 {
-    services.AddSingleton<AgnetaClientService>(new AgnetaClientService("https://agneta-loadbalancer.default.svc.cluster.local/log/ws"));
+    //services.AddSingleton<AgnetaClientService>(new AgnetaClientService("https://agneta-loadbalancer.default.svc.cluster.local/log/ws"));
+    services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://localhost:8080/log/ws"));
     services.AddSingleton<QueryAgentService>();
     services.AddSingleton<StoreBucketRowAgentService>();
 }
