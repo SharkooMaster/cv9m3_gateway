@@ -22,8 +22,8 @@ ConfigureServices(builder.Services);
 // Configure Kestrel to allow HTTP/2 without TLS
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenLocalhost(8100, o => o.Protocols = HttpProtocols.Http2);
-    options.ListenLocalhost(8101, o => o.Protocols = HttpProtocols.Http1);
+    options.ListenAnyIP(8100, o => o.Protocols = HttpProtocols.Http2);
+    options.ListenAnyIP(8101, o => o.Protocols = HttpProtocols.Http1);
 });
 
 builder.Services.AddEndpointsApiExplorer();
@@ -36,7 +36,7 @@ builder.Services.AddSwaggerGen();
 var app = builder.Build();
 
 var agnetaClientService = app.Services.GetRequiredService<AgnetaClientService>();
-await agnetaClientService.ConnectAsync();
+//await agnetaClientService.ConnectAsync();
 AgnetaHandler.SetInstance(agnetaClientService);
 
 if (app.Environment.IsDevelopment())
