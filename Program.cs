@@ -58,6 +58,9 @@ app.MapGet("/", () =>
 
 app.Run();
 
+await AgnetaHandler.Close();
+Console.WriteLine("Connection closed with AgnetaClientService");
+
 void ConfigureServices(IServiceCollection services)
 {
     services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://agneta-loadbalancer.default.svc.cluster.local/log/ws"));
