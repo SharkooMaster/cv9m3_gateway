@@ -1,3 +1,4 @@
+using Gateway.Modules.Pushover;
 using Gateway.Services.Agneta;
 using Gateway.Utils.Globals;
 using Newtonsoft.Json;
@@ -46,6 +47,7 @@ public static class AgnetaHandler
         }
         else
         {
+            PushoverHandler.PushNotification($"Gateway:{Globals.ETCD_ID}:Failed to send log to agneta. No service running");
             Console.WriteLine("ERROR::AgnetaHandler.Log: No service running");
         }
     }
