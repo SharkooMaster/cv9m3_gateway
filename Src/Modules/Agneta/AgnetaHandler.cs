@@ -49,4 +49,9 @@ public static class AgnetaHandler
             Console.WriteLine("ERROR::AgnetaHandler.Log: No service running");
         }
     }
+
+    public static async Task Close()
+    {
+        await _instance.SendCloseAsync();
+    }
 }
