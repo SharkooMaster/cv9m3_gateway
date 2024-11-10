@@ -12,6 +12,9 @@ using Agent.Services.Grpc;
 using Gateway.Services.Agneta;
 using Gateway.Modules.Agneta;
 using System.Buffers;
+using Gateway.Services.PushOver;
+using Gateway.Modules.Pushover;
+using Gateway.Utils.Globals;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -35,6 +38,9 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+var pushoverClientService = app.Services.GetRequiredService<PushoverClientService>();
+PushoverHandler.SetInstance(pushoverClientService);
+
 var agnetaClientService = app.Services.GetRequiredService<AgnetaClientService>();
 await agnetaClientService.ConnectAsync();
 AgnetaHandler.SetInstance(agnetaClientService);
@@ -56,6 +62,7 @@ app.MapGet("/", () =>
     return "Hello world";
 });
 
+//PushoverHandler.PushNotification($"Gateway:{Globals.ETCD_ID}: Running");
 app.Run();
 
 await AgnetaHandler.Close();
@@ -65,6 +72,7 @@ void ConfigureServices(IServiceCollection services)
 {
     services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://agneta-loadbalancer.default.svc.cluster.local/log/ws"));
     //services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://localhost:8080/log/ws"));
+    services.AddSingleton<PushoverClientService>(new PushoverClientService());
     services.AddSingleton<QueryAgentService>();
     services.AddSingleton<StoreBucketRowAgentService>();
 }
