@@ -19,13 +19,14 @@ public class PushoverClientService : IPushoverClientService
         }
     }
 
-    public async Task PushNotificationAsync(string message)
+    public async Task PushNotificationAsync(string message, int _prio = 0)
     {
         var values = new Dictionary<string, string>
         {
             { "token", _token },
             { "user", _user_key },
-            { "message", message }
+            { "message", message },
+            { "priority", _prio.ToString()}
         };
 
         var content = new FormUrlEncodedContent(values);
