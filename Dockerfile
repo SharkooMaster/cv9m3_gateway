@@ -12,5 +12,8 @@ WORKDIR /app
 
 COPY --from=build-env /app/out .
 
+ARG PUSHOVER_USER_KEY
+ARG PUSHOVER_TOKEN_GATEWAY
+
 EXPOSE 8100 8101
 ENTRYPOINT [ "dotnet", "gateway.dll", "--urls", "'http://0.0.0.0:8100'" ]
