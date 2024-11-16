@@ -37,7 +37,7 @@ public static class AgnetaHandler
         if(_instance != null)
         {
             LogMessage _log = new LogMessage();
-            _log.ClientKey = Globals.ETCD_ID.ToString();
+            _log.ClientKey = Globals.GATEWAY_ID.ToString();
             _log.ClientType = "Gateway";
             _log.LogLevel = _level;
             _log.LogMessageText = _message;
@@ -47,7 +47,7 @@ public static class AgnetaHandler
         }
         else
         {
-            PushoverHandler.PushNotification($"Gateway:{Globals.ETCD_ID}:Failed to send log to agneta. No service running");
+            PushoverHandler.PushNotification($"Gateway:{Globals.GATEWAY_ID}:Failed to send log to agneta. No service running");
             Console.WriteLine("ERROR::AgnetaHandler.Log: No service running");
         }
     }
