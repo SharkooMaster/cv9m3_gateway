@@ -24,7 +24,9 @@ build:
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
   script:
-    - docker build --build-arg PUCHOVER_USER_KEY=${PUCHOVER_USER_KEY} --build-arg PUSHOVER_TOKEN_GATEWAY=${PUSHOVER_TOKEN} -t registry.gitlab.com/tpvdb/tpvdb/gateway .
+    - echo $PUSHOVER_TOKEN
+    - echo $PUSHOVER_USER_KEY
+    - docker build --build-arg PUSHOVER_USER_KEY=${PUSHOVER_USER_KEY} --build-arg PUSHOVER_TOKEN_GATEWAY=${PUSHOVER_TOKEN} -t registry.gitlab.com/tpvdb/tpvdb/gateway .
     - docker push registry.gitlab.com/tpvdb/tpvdb/gateway
   only:
     - dev
