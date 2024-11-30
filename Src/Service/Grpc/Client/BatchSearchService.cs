@@ -33,8 +33,8 @@ public class BatchSearchService : Client_BatchSearchService.Client_BatchSearchSe
             }));
         }
         Console.WriteLine("batched");
-        await AgnetaHandler.Log(1, "Batched");
-        await Task.WhenAll(searchReqs);
+        await AgnetaHandler.Log(0, "Batched");
+        // await Task.WhenAll(searchReqs);
 
         return null;
     }
