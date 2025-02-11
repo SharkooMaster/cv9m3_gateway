@@ -14,6 +14,7 @@ public static class Globals
     public static long   GATEWAY_LEASE_ID   = -1;
 
     public static float MinThresh = 0.6f;
+    public static int K = 4;
 
     // AGENTS_CONFIG
     public static string AgentsLoadbalancer = "http://agent-loadbalancer.default.svc.cluster.local:5000";

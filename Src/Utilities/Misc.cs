@@ -57,4 +57,23 @@ public static class Misc
 
         return localIP;
     }
+
+    public static byte[] HexStringToByteArray(string hexString)
+    {
+        if (string.IsNullOrWhiteSpace(hexString))
+        {
+            return Array.Empty<byte>();
+        }
+
+        string[] hexValues = hexString.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+        byte[] bytes = new byte[hexValues.Length];
+
+        for (int i = 0; i < hexValues.Length; i++)
+        {
+            bytes[i] = Convert.ToByte(hexValues[i].Trim(), 16);
+        }
+
+        return bytes;
+    }
+
 }
