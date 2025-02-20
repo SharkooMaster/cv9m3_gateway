@@ -56,6 +56,7 @@ app.UseRouting();
 
 app.MapGrpcService<GreeterService>();
 app.MapGrpcService<BatchSearchService>();
+app.MapGrpcService<SearchAllService>();
 
 app.MapGet("/", () =>
 {
