@@ -25,8 +25,8 @@ ConfigureServices(builder.Services);
 // Configure Kestrel to allow HTTP/2 without TLS
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenAnyIP(8100, o => o.Protocols = HttpProtocols.Http2);
-    options.ListenAnyIP(8101, o => o.Protocols = HttpProtocols.Http1);
+    options.ListenAnyIP(5000, o => o.Protocols = HttpProtocols.Http2);
+    options.ListenAnyIP(5001, o => o.Protocols = HttpProtocols.Http1);
 });
 
 builder.Services.AddEndpointsApiExplorer();
