@@ -33,7 +33,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             //SearchVectorService
             await AgnetaHandler.Log(0, $"Searching agents [{i}]");
             SearchVector_Result res = await svs.ClientGet(_req, Globals.AgentsLoadbalancer);
-            await AgnetaHandler.Log(0, $"Searched agents [{i}]");
+            await AgnetaHandler.Log(0, $"Searched agents [{i}]::{res.Results.Count}");
             if(res.Results.Count == 0)
             {
                 // save
