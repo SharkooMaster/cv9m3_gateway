@@ -1,4 +1,5 @@
 
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Gateway.Modules.Agneta;
 using Gateway.Utils.Globals;
@@ -19,7 +20,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
         await AgnetaHandler.Log(0, "Request recieved [SEARCH_ALL]");
-        QueryResponse to_return = new QueryResponse();
+        QueryResponse _to_return = new QueryResponse();
+        ConcurrentBag<QueryResponseObject> to_return = new ConcurrentBag<QueryResponseObject>();
 
         Parallel.For(0, request.QueryObjects.Count, async i => {
         // for (int i = 0; i < request.QueryObjects.Count; i++){
@@ -50,7 +52,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 ulong vectorIndex = svec.Store(svecReq).Id;
                 await AgnetaHandler.Log(0, $"[{i}] Stored new vector: {svecReq.Metadata[..20]}");
 
-                to_return.Results.Add(new QueryResponseObject() {
+                to_return.Add(new QueryResponseObject() {
                     Id = Convert.ToUInt64(_req.Bitstring, 2),
                     IdPost = vectorIndex,
                     Index = (uint)i,
@@ -71,7 +73,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                         Google.Protobuf.ByteString _chunk = ByteString.CopyFrom(Convert.FromBase64String(_meta["chunk"]?.ToString()));
                         await AgnetaHandler.Log(0, $"[{i}]:[{j}] Chunk copied");
 
-                        to_return.Results.Add(new QueryResponseObject() {
+                        to_return.Add(new QueryResponseObject() {
                             Id = res.Results[j].Id,
                             IdPost = res.Results[j].Index,
                             Index = (uint)i,
@@ -85,6 +87,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         // }
         });
 
-        return to_return;
+        _to_return.Results.AddRange(to_return);
+        return _to_return;
     }
 }
