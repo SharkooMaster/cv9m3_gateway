@@ -65,8 +65,11 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     await AgnetaHandler.Log(0, $"[{i}]:[{j}] Sim: {res.Results[j].SimilarityRate}");
                     if(res.Results[j].SimilarityRate >= Globals.MinThresh)
                     {
+                        await AgnetaHandler.Log(0, $"[{i}]:[{j}] Match found, preparing QRO");
                         JObject _meta = JObject.Parse(res.Results[j].Metadata);
+                        await AgnetaHandler.Log(0, $"[{i}]:[{j}] Meta parsed");
                         Google.Protobuf.ByteString _chunk = ByteString.CopyFrom(Gateway.Utils.Misc.Misc.HexStringToByteArray(_meta["chunk"]?.ToString()));
+                        await AgnetaHandler.Log(0, $"[{i}]:[{j}] Chunk copied");
 
                         to_return.Results.Add(new QueryResponseObject() {
                             Id = res.Results[j].Id,
@@ -75,6 +78,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             Similarity = res.Results[j].SimilarityRate,
                             Chunk = _chunk
                         });
+                        await AgnetaHandler.Log(0, $"[{i}]:[{j}] Result added");
                     }
                 }
             }
