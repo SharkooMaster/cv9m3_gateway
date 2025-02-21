@@ -1,5 +1,6 @@
 
 using System.Text.Json;
+using Gateway.Modules.Agneta;
 using Gateway.Utils.Globals;
 using Gateway.Utils.Misc;
 using GatewayService;
@@ -16,7 +17,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
-        Console.WriteLine("Request recieved [SEARCH_ALL]");
+        await AgnetaHandler.Log(0, "Request recieved [SEARCH_ALL]");
         QueryResponse to_return = new QueryResponse();
 
         Parallel.For(0, request.QueryObjects.Count, async i => {
@@ -25,12 +26,12 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             _req.Bitstring = request.QueryObjects[i].BucketString;
             _req.K = Globals.K;
             _req.MinimumSimilarity = Globals.MinThresh;
-            Console.WriteLine(request.QueryObjects[i].BucketString);
+            await AgnetaHandler.Log(0, request.QueryObjects[i].BucketString);
 
             //SearchVectorService
-            Console.WriteLine($"Searching agents [{i}]");
+            await AgnetaHandler.Log(0, $"Searching agents [{i}]");
             SearchVector_Result res = await svs.ClientGet(_req, Globals.AgentsLoadbalancer);
-            Console.WriteLine($"Searched agents [{i}]");
+            await AgnetaHandler.Log(0, $"Searched agents [{i}]");
             for (int j = 0; j < res.Results.Count; j++)
             {
                 if(res.Results[j].SimilarityRate >= Globals.MinThresh)
