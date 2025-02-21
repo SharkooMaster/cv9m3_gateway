@@ -16,7 +16,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
-        Console.WriteLine("Request recieved");
+        Console.WriteLine("Request recieved [SEARCH_ALL]");
         QueryResponse to_return = new QueryResponse();
 
         Parallel.For(0, request.QueryObjects.Count, async i => {
