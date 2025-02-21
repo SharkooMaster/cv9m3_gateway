@@ -34,6 +34,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             await AgnetaHandler.Log(0, $"Searched agents [{i}]");
             for (int j = 0; j < res.Results.Count; j++)
             {
+                await AgnetaHandler.Log(0, $"[{i}]:[{j}] Sim: {res.Results[j].SimilarityRate}");
                 if(res.Results[j].SimilarityRate >= Globals.MinThresh)
                 {
                     JObject _meta = JObject.Parse(res.Results[j].Metadata);
