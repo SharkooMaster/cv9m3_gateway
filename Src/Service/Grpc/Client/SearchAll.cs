@@ -20,7 +20,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         await AgnetaHandler.Log(0, "Request recieved [SEARCH_ALL]");
         QueryResponse to_return = new QueryResponse();
 
-        Parallel.For(0, request.QueryObjects.Count, async i => {
+        //Parallel.For(0, request.QueryObjects.Count, async i => {
+        for (int i = 0; i < request.QueryObjects.Count; i++){
             SearchVector_Req _req = new SearchVector_Req();
             _req.Vector.AddRange(request.QueryObjects[i].Vector);
             _req.Bitstring = request.QueryObjects[i].BucketString;
@@ -49,7 +50,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     });
                 }
             }
-        });
+        }
+        //});
 
         return to_return;
     }
