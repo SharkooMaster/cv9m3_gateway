@@ -68,7 +68,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                         await AgnetaHandler.Log(0, $"[{i}]:[{j}] Match found, preparing QRO");
                         JObject _meta = JObject.Parse(res.Results[j].Metadata);
                         await AgnetaHandler.Log(0, $"[{i}]:[{j}] Meta parsed");
-                        Google.Protobuf.ByteString _chunk = ByteString.CopyFrom(Gateway.Utils.Misc.Misc.HexStringToByteArray(_meta["chunk"]?.ToString()));
+                        Google.Protobuf.ByteString _chunk = ByteString.CopyFrom(Convert.FromBase64String(_meta["chunk"]?.ToString()));
                         await AgnetaHandler.Log(0, $"[{i}]:[{j}] Chunk copied");
 
                         to_return.Results.Add(new QueryResponseObject() {
