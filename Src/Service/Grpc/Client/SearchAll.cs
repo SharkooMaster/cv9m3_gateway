@@ -80,7 +80,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             Similarity = res.Results[j].SimilarityRate,
                             Chunk = _chunk
                         });
-                        await AgnetaHandler.Log(0, $"[{i}]:[{j}] Result added");
+                        await AgnetaHandler.Log(0, $"[{i}]:[{j}] Result added {to_return.Count}");
                     }
                 }
             }
