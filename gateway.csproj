@@ -34,6 +34,7 @@
 
     <Protobuf Include="Protos\SearchAll.proto" GrpcServices="server" />
     <Protobuf Include="Protos\SearchVector.proto" GrpcServices="client" />
+    <Protobuf Include="Protos\StoreVector.proto" GrpcServices="client" />
   </ItemGroup>
 
   <PropertyGroup>
