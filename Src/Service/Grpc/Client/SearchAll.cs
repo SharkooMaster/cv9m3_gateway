@@ -25,9 +25,12 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             _req.Bitstring = request.QueryObjects[i].BucketString;
             _req.K = Globals.K;
             _req.MinimumSimilarity = Globals.MinThresh;
+            Console.WriteLine(request.QueryObjects[i].BucketString);
 
             //SearchVectorService
+            Console.WriteLine($"Searching agents [{i}]");
             SearchVector_Result res = await svs.ClientGet(_req, Globals.AgentsLoadbalancer);
+            Console.WriteLine($"Searched agents [{i}]");
             for (int j = 0; j < res.Results.Count; j++)
             {
                 if(res.Results[j].SimilarityRate >= Globals.MinThresh)
