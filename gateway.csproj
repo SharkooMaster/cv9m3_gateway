@@ -32,9 +32,9 @@
     <Protobuf Include="Protos\Internal\QueryAgent.proto" GrpcServices="Client" />
     <Protobuf Include="Protos\Internal\StoreBucketRowAgent.proto" GrpcServices="Client" />
 
-    <Protobuf Include="Protos\SearchAll.proto" GrpcServices="server" />
-    <Protobuf Include="Protos\SearchVector.proto" GrpcServices="client" />
-    <Protobuf Include="Protos\StoreVector.proto" GrpcServices="client" />
+    <Protobuf Include="Protos\SearchAll.proto" GrpcServices="Server" />
+    <Protobuf Include="Protos\SearchVector.proto" GrpcServices="Client" />
+    <Protobuf Include="Protos\StoreVector.proto" GrpcServices="Client" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -13,7 +13,7 @@ public class SearchVectorService : SearchVector.SearchVectorClient
         try
         {
             var channel = GrpcChannel.ForAddress(Globals.AgentsLoadbalancer);
-            SearchVector.SearchVectorClient _client = new SearchVector.SearchVectorClient(channel);
+            StoreVector.StoreVectorClient _client = new StoreVector.StoreVectorClient(channel);
 
             return await _client.GetAsync(req);
         }
