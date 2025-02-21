@@ -36,6 +36,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             await AgnetaHandler.Log(0, $"Searched agents [{i}]::{res.Results.Count}");
             if(res.Results.Count == 0)
             {
+                await AgnetaHandler.Log(0, $"Storing [{i}]");
                 // save
                 StoreVector_Req svecReq = new StoreVector_Req();
                 svecReq.TargetIp = res.TargetIp;
@@ -45,7 +46,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 M_Meta _meta = new M_Meta();
                 _meta.chunk = Convert.ToBase64String(request.QueryObjects[i].Chunk.ToByteArray());
                 svecReq.Metadata = JsonConvert.SerializeObject(_meta);
-                await AgnetaHandler.Log(0, $"[{i}] Storing new vector: {svecReq.Metadata[..20]}");
+                await AgnetaHandler.Log(0, $"[{i}] Storing new vector");
                 ulong vectorIndex = svec.Store(svecReq).Id;
                 await AgnetaHandler.Log(0, $"[{i}] Stored new vector: {svecReq.Metadata[..20]}");
 
