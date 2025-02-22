@@ -66,7 +66,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     {
                         Id = Convert.ToUInt64(req.Bitstring, 2),
                         IdPost = vectorIndex,
-                        Index = index,
+                        Index = request.QueryObjects[i].Index,
                         Similarity = 1,
                         Chunk = request.QueryObjects[index].Chunk
                     });
@@ -89,7 +89,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             {
                                 Id = res.Results[j].Id,
                                 IdPost = res.Results[j].Index,
-                                Index = index,
+                                Index = request.QueryObjects[i].Index,
                                 Similarity = res.Results[j].SimilarityRate,
                                 Chunk = chunk
                             });
