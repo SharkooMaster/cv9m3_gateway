@@ -19,75 +19,91 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
-        await AgnetaHandler.Log(0, "Request recieved [SEARCH_ALL]");
-        QueryResponse _to_return = new QueryResponse();
-        ConcurrentBag<QueryResponseObject> to_return = new ConcurrentBag<QueryResponseObject>();
+        await AgnetaHandler.Log(0, "Request received [SEARCH_ALL]");
+        QueryResponse response = new QueryResponse();
+        ConcurrentBag<QueryResponseObject> resultsBag = new ConcurrentBag<QueryResponseObject>();
 
-        Parallel.For(0, request.QueryObjects.Count, async i => {
-        // for (int i = 0; i < request.QueryObjects.Count; i++){
-            SearchVector_Req _req = new SearchVector_Req();
-            _req.Vector.AddRange(request.QueryObjects[i].Vector);
-            _req.Bitstring = request.QueryObjects[i].BucketString;
-            _req.K = Globals.K;
-            _req.MinimumSimilarity = Globals.MinThresh;
-            await AgnetaHandler.Log(0, request.QueryObjects[i].BucketString);
+        // Create a list of tasks instead of using Parallel.For with async lambdas
+        var tasks = new List<Task>();
 
-            //SearchVectorService
-            await AgnetaHandler.Log(0, $"Searching agents [{i}]");
-            SearchVector_Result res = await svs.ClientGet(_req, Globals.AgentsLoadbalancer);
-            await AgnetaHandler.Log(0, $"Searched agents [{i}]::{res.Results.Count}");
-            if(res.Results.Count == 0)
+        for (int i = 0; i < request.QueryObjects.Count; i++)
+        {
+            int index = i; // capture the loop variable
+            tasks.Add(Task.Run(async () =>
             {
-                await AgnetaHandler.Log(0, $"Storing [{i}]");
-                // save
-                StoreVector_Req svecReq = new StoreVector_Req();
-                svecReq.TargetIp = res.TargetIp;
-                svecReq.Bitstring = _req.Bitstring;
-                svecReq.Vector.AddRange(_req.Vector);
+                SearchVector_Req req = new SearchVector_Req();
+                req.Vector.AddRange(request.QueryObjects[index].Vector);
+                req.Bitstring = request.QueryObjects[index].BucketString;
+                req.K = Globals.K;
+                req.MinimumSimilarity = Globals.MinThresh;
+                await AgnetaHandler.Log(0, request.QueryObjects[index].BucketString);
 
-                M_Meta _meta = new M_Meta();
-                _meta.chunk = Convert.ToBase64String(request.QueryObjects[i].Chunk.ToByteArray());
-                svecReq.Metadata = JsonConvert.SerializeObject(_meta);
-                await AgnetaHandler.Log(0, $"[{i}] Storing new vector");
-                ulong vectorIndex = svec.Store(svecReq).Id;
-                await AgnetaHandler.Log(0, $"[{i}] Stored new vector: {svecReq.Metadata[..20]}");
+                await AgnetaHandler.Log(0, $"Searching agents [{index}]");
+                SearchVector_Result res = await svs.ClientGet(req, Globals.AgentsLoadbalancer);
+                await AgnetaHandler.Log(0, $"Searched agents [{index}]::{res.Results.Count}");
 
-                to_return.Add(new QueryResponseObject() {
-                    Id = Convert.ToUInt64(_req.Bitstring, 2),
-                    IdPost = vectorIndex,
-                    Index = (uint)i,
-                    Similarity = 1,
-                    Chunk = request.QueryObjects[i].Chunk
-                });
-            }
-            else
-            {
-                for (int j = 0; j < res.Results.Count; j++)
+                if (res.Results.Count == 0)
                 {
-                    await AgnetaHandler.Log(0, $"[{i}]:[{j}] Sim: {res.Results[j].SimilarityRate}");
-                    if(res.Results[j].SimilarityRate >= Globals.MinThresh)
+                    await AgnetaHandler.Log(0, $"Storing [{index}]");
+                    // Save
+                    StoreVector_Req svecReq = new StoreVector_Req
                     {
-                        await AgnetaHandler.Log(0, $"[{i}]:[{j}] Match found, preparing QRO");
-                        JObject _meta = JObject.Parse(res.Results[j].Metadata);
-                        await AgnetaHandler.Log(0, $"[{i}]:[{j}] Meta parsed");
-                        Google.Protobuf.ByteString _chunk = ByteString.CopyFrom(Convert.FromBase64String(_meta["chunk"]?.ToString()));
-                        await AgnetaHandler.Log(0, $"[{i}]:[{j}] Chunk copied");
+                        TargetIp = res.TargetIp,
+                        Bitstring = req.Bitstring
+                    };
+                    svecReq.Vector.AddRange(req.Vector);
 
-                        to_return.Add(new QueryResponseObject() {
-                            Id = res.Results[j].Id,
-                            IdPost = res.Results[j].Index,
-                            Index = (uint)i,
-                            Similarity = res.Results[j].SimilarityRate,
-                            Chunk = _chunk
-                        });
-                        await AgnetaHandler.Log(0, $"[{i}]:[{j}] Result added {to_return.Count}");
+                    M_Meta meta = new M_Meta
+                    {
+                        chunk = Convert.ToBase64String(request.QueryObjects[index].Chunk.ToByteArray())
+                    };
+                    svecReq.Metadata = JsonConvert.SerializeObject(meta);
+                    await AgnetaHandler.Log(0, $"[{index}] Storing new vector");
+                    ulong vectorIndex = svec.Store(svecReq).Id;
+                    await AgnetaHandler.Log(0, $"[{index}] Stored new vector: {svecReq.Metadata[..20]}");
+
+                    resultsBag.Add(new QueryResponseObject
+                    {
+                        Id = Convert.ToUInt64(req.Bitstring, 2),
+                        IdPost = vectorIndex,
+                        Index = (uint)index,
+                        Similarity = 1,
+                        Chunk = request.QueryObjects[index].Chunk
+                    });
+                }
+                else
+                {
+                    for (int j = 0; j < res.Results.Count; j++)
+                    {
+                        await AgnetaHandler.Log(0, $"[{index}]:[{j}] Sim: {res.Results[j].SimilarityRate}");
+                        if (res.Results[j].SimilarityRate >= Globals.MinThresh)
+                        {
+                            await AgnetaHandler.Log(0, $"[{index}]:[{j}] Match found, preparing QRO");
+                            JObject meta = JObject.Parse(res.Results[j].Metadata);
+                            await AgnetaHandler.Log(0, $"[{index}]:[{j}] Meta parsed");
+                            Google.Protobuf.ByteString chunk = ByteString.CopyFrom(
+                                Convert.FromBase64String(meta["chunk"]?.ToString()));
+                            await AgnetaHandler.Log(0, $"[{index}]:[{j}] Chunk copied");
+
+                            resultsBag.Add(new QueryResponseObject
+                            {
+                                Id = res.Results[j].Id,
+                                IdPost = res.Results[j].Index,
+                                Index = (uint)index,
+                                Similarity = res.Results[j].SimilarityRate,
+                                Chunk = chunk
+                            });
+                            await AgnetaHandler.Log(0, $"[{index}]:[{j}] Result added {resultsBag.Count}");
+                        }
                     }
                 }
-            }
-        // }
-        });
+            }));
+        }
 
-        _to_return.Results.AddRange(to_return);
-        return _to_return;
+        // Await all the tasks to complete
+        await Task.WhenAll(tasks);
+
+        response.Results.AddRange(resultsBag);
+        return response;
     }
 }
