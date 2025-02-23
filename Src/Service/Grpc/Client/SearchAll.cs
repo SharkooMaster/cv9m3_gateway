@@ -22,6 +22,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         await AgnetaHandler.Log(0, "Request received [SEARCH_ALL]");
         QueryResponse response = new QueryResponse();
         ConcurrentBag<QueryResponseObject> resultsBag = new ConcurrentBag<QueryResponseObject>();
+        ConcurrentBag<int> FoundBag = new ConcurrentBag<int>();
 
         // Create a list of tasks instead of using Parallel.For with async lambdas
         var tasks = new List<Task>();
@@ -42,7 +43,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 SearchVector_Result res = await svs.ClientGet(req, Globals.AgentsLoadbalancer);
                 await AgnetaHandler.Log(0, $"Searched agents [{index}]::{res.Results.Count}");
 
-                if (res.Results.Count == 0)
+                if (res.Results.Count == 0 && !request.QueryObjects[index].IsNeighbour)
                 {
                     await AgnetaHandler.Log(0, $"Storing [{index}]");
                     // Save
