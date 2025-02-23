@@ -13,7 +13,9 @@ public class StoreVectorService : StoreVector.StoreVectorClient
     {
         try
         {
-            var channel = GrpcChannel.ForAddress(Globals.AgentsLoadbalancer);
+            var channel = GrpcChannel.ForAddress(Globals.AgentsLoadbalancer, new GrpcChannelOptions{
+                MaxReceiveMessageSize = 1000*1024*1024
+            });
             StoreVector.StoreVectorClient _client = new StoreVector.StoreVectorClient(channel);
 
             return _client.Store(request);

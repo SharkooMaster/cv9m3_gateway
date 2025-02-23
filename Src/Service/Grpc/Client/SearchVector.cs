@@ -12,7 +12,9 @@ public class SearchVectorService : SearchVector.SearchVectorClient
     {
         try
         {
-            var channel = GrpcChannel.ForAddress(Globals.AgentsLoadbalancer);
+            var channel = GrpcChannel.ForAddress(Globals.AgentsLoadbalancer, new GrpcChannelOptions{
+                MaxReceiveMessageSize = 1000*1024*1024
+            });
             SearchVector.SearchVectorClient _client = new SearchVector.SearchVectorClient(channel);
 
             return await _client.GetAsync(req);
