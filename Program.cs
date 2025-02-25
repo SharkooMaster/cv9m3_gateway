@@ -18,7 +18,10 @@ using Gateway.Utils.Globals;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddGrpc();
+builder.Services.AddGrpc(options => {
+    options.MaxReceiveMessageSize = 1000 * 1024 * 1024;
+    options.MaxSendMessageSize = 1000 * 1024 * 1024;
+});
 
 ConfigureServices(builder.Services);
 
