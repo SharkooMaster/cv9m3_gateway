@@ -13,7 +13,7 @@ public class QueryAgentService
     {
         _logger = logger;
 
-        var channel = GrpcChannel.ForAddress(Globals.AgentsLoadbalancer);
+        var channel = GrpcChannel.ForAddress(Globals.AgentsLoadbalancer, Globals.GRPC_OPTIONS);
         _client = new QueryAgent.QueryAgentClient(channel);
     }
 

@@ -1,5 +1,6 @@
 using Gateway.Models;
 using Gateway.Utils.Misc;
+using Grpc.Net.Client;
 namespace Gateway.Utils.Globals;
 
 public static class Globals
@@ -18,4 +19,9 @@ public static class Globals
 
     // AGENTS_CONFIG
     public static string AgentsLoadbalancer = "http://agent-loadbalancer.default.svc.cluster.local:80";
+
+    public static GrpcChannelOptions GRPC_OPTIONS = new GrpcChannelOptions{
+        MaxReceiveMessageSize = 1000*1024*1024,
+        MaxSendMessageSize = 1000*1024*1024
+    };
 }

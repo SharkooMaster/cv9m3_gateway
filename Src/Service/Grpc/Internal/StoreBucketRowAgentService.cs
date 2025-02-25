@@ -14,7 +14,7 @@ public class StoreBucketRowAgentService
     public StoreBucketRowAgentService(ILogger<QueryAgentService> logger)
     {
         _logger = logger;
-        var channel = GrpcChannel.ForAddress(Globals.AgentsLoadbalancer);
+        var channel = GrpcChannel.ForAddress(Globals.AgentsLoadbalancer, Globals.GRPC_OPTIONS);
         _client = new StoreBucketRowAgent.StoreBucketRowAgentClient(channel);
     }
 
