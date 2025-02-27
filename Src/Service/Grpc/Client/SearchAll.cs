@@ -125,9 +125,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             }
         }
 
-        // Await all the tasks to complete
-        await Task.WhenAll(tasks);
-
         response.Results.AddRange(resultsBag);
         return response;
     }
