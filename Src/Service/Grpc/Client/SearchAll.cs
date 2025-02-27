@@ -1,5 +1,6 @@
 
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Gateway.Modules.Agneta;
 using Gateway.Utils.Globals;
@@ -41,6 +42,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 char[] req_bitstring = req.Bitstring.ToCharArray();
 
                 SearchVector_Result res = new SearchVector_Result();
+                Stopwatch sw = new Stopwatch();
+                sw.Start();
                 for (int j = 0; j < 64; j++)
                 {
                     if(j > 0)
@@ -58,6 +61,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                         res.TargetIp = _res.TargetIp;
                     }
                 }
+                sw.Stop();
+                Console.WriteLine($"{index}: took {sw.ElapsedMilliseconds}ms to search for buckets");
 
                 if (res.Results.Count == 0 && !request.QueryObjects[index].IsNeighbour)
                 {
