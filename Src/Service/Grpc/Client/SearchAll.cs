@@ -19,7 +19,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
-        await AgnetaHandler.Log(0, "Request received [SEARCH_ALL]");
+        // await AgnetaHandler.Log(0, "Request received [SEARCH_ALL]");
         QueryResponse response = new QueryResponse();
         ConcurrentBag<QueryResponseObject> resultsBag = new ConcurrentBag<QueryResponseObject>();
         ConcurrentBag<int> FoundBag = new ConcurrentBag<int>();
