@@ -38,10 +38,26 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 req.K = Globals.K;
                 req.MinimumSimilarity = Globals.MinThresh;
                 await AgnetaHandler.Log(0, request.QueryObjects[index].BucketString);
+                char[] req_bitstring = req.Bitstring.ToCharArray();
 
-                await AgnetaHandler.Log(0, $"Searching agents [{index}]");
-                SearchVector_Result res = await svs.ClientGet(req, Globals.AgentsLoadbalancer);
-                await AgnetaHandler.Log(0, $"Searched agents [{index}]::{res.Results.Count}");
+                SearchVector_Result res = new SearchVector_Result();
+                for (int j = 0; j < 64; j++)
+                {
+                    if(j > 0)
+                    {
+                        req_bitstring[j] = (req_bitstring[j] == '0') ? '1' : '0';
+                        req.Bitstring = new string(req_bitstring);
+                    }
+                    await AgnetaHandler.Log(0, $"Searching agents [{index}]");
+                    SearchVector_Result _res = await svs.ClientGet(req, Globals.AgentsLoadbalancer);
+                    await AgnetaHandler.Log(0, $"Searched agents [{index}]::{_res.Results.Count}");
+
+                    res.Results.AddRange(_res.Results);
+                    if(j == 0)
+                    {
+                        res.TargetIp = _res.TargetIp;
+                    }
+                }
 
                 if (res.Results.Count == 0 && !request.QueryObjects[index].IsNeighbour)
                 {
