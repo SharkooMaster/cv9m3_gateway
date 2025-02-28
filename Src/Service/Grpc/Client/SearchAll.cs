@@ -44,8 +44,9 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             Stopwatch sw = new Stopwatch();
             sw.Start();
             var tasks = new List<Task>();
-            for (int j = 0; j < 64; j++)
+            for (int _j = 0; _j < 64; _j++)
             {
+                int j = _j;
                 tasks.Add(Task.Run(async () =>
                 {
                     if(j > 0)
