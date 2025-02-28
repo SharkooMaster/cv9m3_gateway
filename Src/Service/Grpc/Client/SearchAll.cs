@@ -1,6 +1,7 @@
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Gateway.Modules.Agneta;
 using Gateway.Utils.Globals;
@@ -8,8 +9,10 @@ using Gateway.Utils.Misc;
 using GatewayService;
 using Google.Protobuf;
 using Grpc.Core;
+using Microsoft.AspNetCore.Server.HttpSys;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Xunit.Sdk;
 
 namespace Gateway.Services.Grpc;
 
@@ -35,43 +38,53 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             req.Bitstring = request.QueryObjects[index].BucketString;
             req.K = Globals.K;
             req.MinimumSimilarity = Globals.MinThresh;
-            await AgnetaHandler.Log(0, request.QueryObjects[index].BucketString);
-            char[] req_bitstring = req.Bitstring.ToCharArray();
 
-            SearchVector_Result res = new SearchVector_Result();
-            ConcurrentBag<SearchVectorObject> svOjects = new ConcurrentBag<SearchVectorObject>();
+            List<string> bitFlippedStrings = new List<string>();
+            for (int j = 0; j < 64; j++)
+            {
+                char[] modifiedBits = req.Bitstring.ToCharArray();
+                modifiedBits[j] = (modifiedBits[j] == '0') ? '1' : '0';
+                bitFlippedStrings.Add(new string(modifiedBits));
+            }
+
+            if(!bitFlippedStrings.Contains(req.Bitstring))
+            {
+                bitFlippedStrings.Add(req.Bitstring);
+            }
 
             Stopwatch sw = new Stopwatch();
             sw.Start();
-            var tasks = new List<Task>();
-            for (int _j = 0; _j < 64; _j++)
-            {
-                int j = _j;
-                tasks.Add(Task.Run(async () =>
-                {
-                    if(j > 0)
-                    {
-                        req_bitstring[j] = (req_bitstring[j] == '0') ? '1' : '0';
-                        req.Bitstring = new string(req_bitstring);
-                    }
-                    await AgnetaHandler.Log(0, $"Searching agents [{index}]");
-                    SearchVector_Result _res = await svs.ClientGet(req, Globals.AgentsLoadbalancer);
-                    await AgnetaHandler.Log(0, $"Searched agents [{index}]::{_res.Results.Count}");
 
-                    res.Results.AddRange(_res.Results);
-                    if(j == 0)
-                    {
-                        res.TargetIp = _res.TargetIp;
-                    }
-                }));
+            string _target_ip = "";
+            ConcurrentBag<SearchVector_Result> searchResults = new ConcurrentBag<SearchVector_Result>();
+            await Parallel.ForEachAsync(bitFlippedStrings, async (flippedBitstring, token) =>
+            {
+                SearchVector_Req searchReq = new SearchVector_Req
+                {
+                    Bitstring = flippedBitstring,
+                    Vector = { req.Vector },
+                    K = Globals.K,
+                    MinimumSimilarity = Globals.MinThresh
+                };
+
+                SearchVector_Result _res = await svs.ClientGet(searchReq, Globals.AgentsLoadbalancer);
+                searchResults.Add(_res);
+
+                if(searchReq.Bitstring == req.Bitstring){ _target_ip = _res.TargetIp; }
+            });
+
+            SearchVector_Result res = new SearchVector_Result();
+            List<SearchVector_Result> _searchResults = searchResults.ToList();
+            for (int k = 0; k < searchResults.Count; k++)
+            {
+                res.Results.AddRange(_searchResults[k].Results);
             }
-            await Task.WhenAll(tasks);
+            res.TargetIp = _target_ip;
             sw.Stop();
             Console.WriteLine($"{index}: took {sw.ElapsedMilliseconds}ms to search for buckets");
 
             if (res.Results.Count == 0 && !request.QueryObjects[index].IsNeighbour)
             {
-                await AgnetaHandler.Log(0, $"Storing [{index}]");
                 // Save
                 StoreVector_Req svecReq = new StoreVector_Req
                 {
@@ -85,9 +98,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     chunk = Convert.ToBase64String(request.QueryObjects[index].Chunk.ToByteArray())
                 };
                 svecReq.Metadata = JsonConvert.SerializeObject(meta);
-                await AgnetaHandler.Log(0, $"[{index}] Storing new vector");
                 ulong vectorIndex = svec.Store(svecReq).Id;
-                await AgnetaHandler.Log(0, $"[{index}] Stored new vector: {svecReq.Metadata[..20]}");
 
                 resultsBag.Add(new QueryResponseObject
                 {
@@ -102,15 +113,11 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             {
                 for (int j = 0; j < res.Results.Count; j++)
                 {
-                    await AgnetaHandler.Log(0, $"[{index}]:[{j}] Sim: {res.Results[j].SimilarityRate}");
                     if (res.Results[j].SimilarityRate >= Globals.MinThresh)
                     {
-                        await AgnetaHandler.Log(0, $"[{index}]:[{j}] Match found, preparing QRO");
                         JObject meta = JObject.Parse(res.Results[j].Metadata);
-                        await AgnetaHandler.Log(0, $"[{index}]:[{j}] Meta parsed");
                         Google.Protobuf.ByteString chunk = ByteString.CopyFrom(
-                            Convert.FromBase64String(meta["chunk"]?.ToString()));
-                        await AgnetaHandler.Log(0, $"[{index}]:[{j}] Chunk copied");
+                        Convert.FromBase64String(meta["chunk"]?.ToString()));
 
                         resultsBag.Add(new QueryResponseObject
                         {
@@ -120,7 +127,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             Similarity = res.Results[j].SimilarityRate,
                             Chunk = chunk
                         });
-                        await AgnetaHandler.Log(0, $"[{index}]:[{j}] Result added {resultsBag.Count}");
                     }
                 }
             }
