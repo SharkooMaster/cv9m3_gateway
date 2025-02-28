@@ -30,8 +30,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
         // Create a list of tasks instead of using Parallel.For with async lambdas
 
-        for (int i = 0; i < request.QueryObjects.Count; i++)
-        {
+        Parallel.For(0, request.QueryObjects.Count, async i => {
             int index = i; // capture the loop variable
             SearchVector_Req req = new SearchVector_Req();
             req.Vector.AddRange(request.QueryObjects[index].Vector);
@@ -98,6 +97,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     chunk = Convert.ToBase64String(request.QueryObjects[index].Chunk.ToByteArray())
                 };
                 svecReq.Metadata = JsonConvert.SerializeObject(meta);
+                svecReq.TargetIp = res.TargetIp;
                 ulong vectorIndex = svec.Store(svecReq).Id;
 
                 resultsBag.Add(new QueryResponseObject
@@ -130,7 +130,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     }
                 }
             }
-        }
+        });
 
         response.Results.AddRange(resultsBag);
         return response;

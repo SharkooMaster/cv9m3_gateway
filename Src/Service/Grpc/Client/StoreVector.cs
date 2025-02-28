@@ -13,7 +13,7 @@ public class StoreVectorService : StoreVector.StoreVectorClient
     {
         try
         {
-            var channel = GrpcChannel.ForAddress(Globals.AgentsLoadbalancer, Globals.GRPC_OPTIONS);
+            var channel = GrpcChannel.ForAddress($"http://{request.TargetIp}:5000", Globals.GRPC_OPTIONS);
             StoreVector.StoreVectorClient _client = new StoreVector.StoreVectorClient(channel);
 
             return _client.Store(request);
