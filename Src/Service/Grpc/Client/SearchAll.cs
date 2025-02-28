@@ -83,7 +83,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             sw.Stop();
             Console.WriteLine($"{index}: took {sw.ElapsedMilliseconds}ms to search for buckets");
 
-            if (res.Results.Count == 0 && !request.QueryObjects[index].IsNeighbour)
+            if (res.Results.Count == 0)
             {
                 // Save
                 StoreVector_Req svecReq = new StoreVector_Req
