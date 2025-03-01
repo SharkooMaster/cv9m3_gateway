@@ -18,14 +18,11 @@ namespace Gateway.Services.Grpc;
 
 public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 {
-    SearchVectorService svs = new SearchVectorService();
-    StoreVectorService svec = new StoreVectorService();
-
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
         QueryResponse response = new QueryResponse();
         List<QueryResponseObject> resultsBag = new List<QueryResponseObject>();
-    
+
         // Create a list of tasks to execute in parallel
         var searchTasks = request.QueryObjects.Select(async (queryObj, index) =>
         {
@@ -36,7 +33,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 MinimumSimilarity = Globals.MinThresh
             };
             req.Vector.AddRange(queryObj.Vector);
-    
+
             // Generate bit-flipped variations
             List<string> bitFlippedStrings = new List<string>();
             for (int j = 0; j < 64; j++)
@@ -45,16 +42,16 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 modifiedBits[j] = (modifiedBits[j] == '0') ? '1' : '0';
                 bitFlippedStrings.Add(new string(modifiedBits));
             }
-    
+
             if (!bitFlippedStrings.Contains(req.Bitstring))
             {
                 bitFlippedStrings.Add(req.Bitstring);
             }
-    
+
             Stopwatch sw = Stopwatch.StartNew();
             string _target_ip = "";
             List<SearchVector_Result> searchResults = new List<SearchVector_Result>();
-    
+
             // Run parallel searches properly
             var searchVectorTasks = bitFlippedStrings.Select(async flippedBitstring =>
             {
@@ -65,31 +62,31 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     MinimumSimilarity = Globals.MinThresh
                 };
                 searchReq.Vector.AddRange(req.Vector);
-    
-                SearchVector_Result _res = await svs.ClientGet(searchReq, Globals.AgentsLoadbalancer);
+
+                SearchVector_Result _res = await Globals.svs.ClientGet(searchReq, Globals.AgentsLoadbalancer);
                 lock (searchResults) // Protect list from concurrent writes
                 {
                     searchResults.Add(_res);
                 }
-    
+
                 if (searchReq.Bitstring == req.Bitstring)
                 {
                     _target_ip = _res.TargetIp;
                 }
             }).ToList();
-    
+
             await Task.WhenAll(searchVectorTasks); // Properly await parallel searches
-    
+
             SearchVector_Result res = new SearchVector_Result();
             foreach (var searchResult in searchResults)
             {
                 res.Results.AddRange(searchResult.Results);
             }
             res.TargetIp = _target_ip;
-    
+
             sw.Stop();
             Console.WriteLine($"{index}: took {sw.ElapsedMilliseconds}ms to search for buckets");
-    
+
             if (res.Results.Count == 0)
             {
                 // Save
@@ -99,14 +96,14 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     Bitstring = req.Bitstring
                 };
                 svecReq.Vector.AddRange(req.Vector);
-    
+
                 M_Meta meta = new M_Meta
                 {
                     chunk = Convert.ToBase64String(queryObj.Chunk.ToByteArray())
                 };
                 svecReq.Metadata = JsonConvert.SerializeObject(meta);
-                ulong vectorIndex = svec.Store(svecReq).Id;
-    
+                ulong vectorIndex = Globals.svec.Store(svecReq).Id;
+
                 lock (resultsBag) // Protect list from concurrent writes
                 {
                     resultsBag.Add(new QueryResponseObject
@@ -128,7 +125,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                         JObject meta = JObject.Parse(result.Metadata);
                         Google.Protobuf.ByteString chunk = ByteString.CopyFrom(
                             Convert.FromBase64String(meta["chunk"]?.ToString()));
-    
+
                         lock (resultsBag)
                         {
                             resultsBag.Add(new QueryResponseObject
@@ -144,9 +141,9 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 }
             }
         }).ToList();
-    
+
         await Task.WhenAll(searchTasks); // Wait for all queries to finish
-    
+
         response.Results.AddRange(resultsBag);
         return response;
     }
