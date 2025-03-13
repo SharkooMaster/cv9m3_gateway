@@ -75,7 +75,7 @@ Console.WriteLine("Connection closed with AgnetaClientService");
 
 void ConfigureServices(IServiceCollection services)
 {
-    services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://agneta-loadbalancer.default.svc.cluster.local/log/ws"));
+    services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://agneta-loadbalancer.default.svc.cluster.local:443/log/ws"));
     //services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://localhost:8080/log/ws"));
     services.AddSingleton<PushoverClientService>(new PushoverClientService());
     services.AddSingleton<QueryAgentService>();
