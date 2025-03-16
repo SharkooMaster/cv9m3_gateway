@@ -4,9 +4,6 @@ using System.Text.Json;
 using Gateway.Utils.Misc;
 using Gateway.Utils.Globals;
 using Google.Protobuf;
-using Gateway.Interfaces.Agneta;
-using Gateway.Models.Misc;
-using Newtonsoft.Json;
 using System.Net.WebSockets;
 using System.Text;
 
