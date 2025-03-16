@@ -4,6 +4,7 @@ using System.Text.Json;
 using Gateway.Utils.Misc;
 using Gateway.Utils.Globals;
 using Google.Protobuf;
+using Newtonsoft.Json;
 using System.Net.WebSockets;
 using System.Text;
 
