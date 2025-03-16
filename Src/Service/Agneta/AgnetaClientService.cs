@@ -62,7 +62,7 @@ namespace Gateway.Services.Agneta
                 catch (Exception ex)
                 {
                     // Log or handle the detailed exception information
-                    //Console.WriteLine($"Failed to connect: {ex}");
+                    Console.WriteLine($"Failed to connect: {ex}");
                     
                     // Optionally rethrow to allow higher-level handling
                     throw;
