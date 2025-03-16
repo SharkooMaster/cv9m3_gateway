@@ -37,8 +37,8 @@ public static class AgnetaHandler
         if(_instance != null)
         {
             LogMessage _log = new LogMessage();
-            _log.ClientKey = Globals._NODE.ip;
-            _log.ClientType = "Agent";
+            _log.ClientKey = Globals.GATEWAY_ID.ToString();
+            _log.ClientType = "Gateway";
             _log.LogLevel = _level;
             _log.LogMessageText = _message;
 
