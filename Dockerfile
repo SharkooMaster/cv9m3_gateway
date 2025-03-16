@@ -16,4 +16,4 @@ ARG PUSHOVER_USER_KEY
 ARG PUSHOVER_TOKEN_GATEWAY
 
 EXPOSE 5000 5001
-ENTRYPOINT [ "dotnet", "gateway.dll", "--urls", "'http://0.0.0.0:8100'" ]
+ENTRYPOINT [ "dotnet", "gateway.dll" ]
