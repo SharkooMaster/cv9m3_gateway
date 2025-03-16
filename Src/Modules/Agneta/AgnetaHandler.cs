@@ -34,23 +34,21 @@ public static class AgnetaHandler
 
     public static async Task Log(int _level, string _message)
     {
-        Console.WriteLine(_message);
-        return;
         if(_instance != null)
         {
             LogMessage _log = new LogMessage();
-            _log.ClientKey = Globals.GATEWAY_ID.ToString();
-            _log.ClientType = "Gateway";
+            _log.ClientKey = Globals._NODE.ip;
+            _log.ClientType = "Agent";
             _log.LogLevel = _level;
             _log.LogMessageText = _message;
 
             await _instance.SendMessageAsync(JsonConvert.SerializeObject(_log));
-            Console.WriteLine("Sent a message");
+            //Console.Writeline("Sent a message");
         }
         else
         {
-            PushoverHandler.PushNotification($"Gateway:{Globals.GATEWAY_ID}:Failed to send log to agneta. No service running");
-            Console.WriteLine("ERROR::AgnetaHandler.Log: No service running");
+            PushoverHandler.PushNotification($"Gateway:{Globals.ETCD_ID}:Failed to send log to agneta. No service running");
+            //Console.Writeline("ERROR::AgnetaHandler.Log: No service running");
         }
     }
 
