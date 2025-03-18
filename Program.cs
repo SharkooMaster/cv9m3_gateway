@@ -75,7 +75,7 @@ Console.WriteLine("Connection closed with AgnetaClientService");
 
 void ConfigureServices(IServiceCollection services)
 {
-    services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://10.97.41.12:443/log/ws"));
+    services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://192.168.50.240:443/log/ws"));
     //services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://localhost:8080/log/ws"));
     services.AddSingleton<PushoverClientService>(new PushoverClientService());
     services.AddSingleton<QueryAgentService>();

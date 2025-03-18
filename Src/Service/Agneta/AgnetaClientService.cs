@@ -35,7 +35,7 @@ namespace Gateway.Services.Agneta
                 };
 
                 _client = new HttpClient(handler);
-                _url = "https://10.97.41.12:443";
+                _url = "https://192.168.50.240:443";
                 _uri = new Uri(uri);
             }
             catch (Exception ex)
