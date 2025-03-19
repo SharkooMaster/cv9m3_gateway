@@ -19,7 +19,7 @@ public static class Globals
     public static int K = 4;
 
     // AGENTS_CONFIG
-    public static string AgentsLoadbalancer = "http://192.168.50.243:5000";
+    public static string AgentsLoadbalancer = "http://192.168.50.243";
     public static SearchVectorService svs = new SearchVectorService();
     public static StoreVectorService svec = new StoreVectorService();
 
