@@ -21,7 +21,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
         QueryResponse response = new QueryResponse();
-        List<QueryResponseObject> resultsBag = new List<QueryResponseObject>();
+        //List<QueryResponseObject> resultsBag = new List<QueryResponseObject>();
+        ConcurrentBag<QueryResponseObject> resultsBag = new ConcurrentBag<QueryResponseObject>();
 
         // Create a list of tasks to execute in parallel
         var searchTasks = request.QueryObjects.Select(async (queryObj, index) =>
@@ -50,7 +51,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
             Stopwatch sw = Stopwatch.StartNew();
             string _target_ip = "";
-            List<SearchVector_Result> searchResults = new List<SearchVector_Result>();
+            ConcurrentBag<SearchVector_Result> searchResults = new ConcurrentBag<SearchVector_Result>();
 
             // Run parallel searches properly
             var searchVectorTasks = bitFlippedStrings.Select(async flippedBitstring =>
@@ -64,10 +65,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 searchReq.Vector.AddRange(req.Vector);
 
                 SearchVector_Result _res = await Globals.svs.ClientGet(searchReq, Globals.AgentsLoadbalancer);
-                lock (searchResults) // Protect list from concurrent writes
-                {
                     searchResults.Add(_res);
-                }
 
                 if (searchReq.Bitstring == req.Bitstring)
                 {
@@ -105,17 +103,14 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 svecReq.Metadata = JsonConvert.SerializeObject(meta);
                 ulong vectorIndex = Globals.svec.Store(svecReq).Id;
 
-                lock (resultsBag) // Protect list from concurrent writes
+                resultsBag.Add(new QueryResponseObject
                 {
-                    resultsBag.Add(new QueryResponseObject
-                    {
-                        Id = Convert.ToUInt64(req.Bitstring, 2),
-                        IdPost = vectorIndex,
-                        Index = queryObj.Index,
-                        Similarity = 1,
-                        Chunk = queryObj.Chunk
-                    });
-                }
+                    Id = Convert.ToUInt64(req.Bitstring, 2),
+                    IdPost = vectorIndex,
+                    Index = queryObj.Index,
+                    Similarity = 1,
+                    Chunk = queryObj.Chunk
+                });
             }
             else
             {
@@ -128,17 +123,14 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                         Google.Protobuf.ByteString chunk = ByteString.CopyFrom(
                             Convert.FromBase64String(meta["chunk"]?.ToString()));
 
-                        lock (resultsBag)
+                        resultsBag.Add(new QueryResponseObject
                         {
-                            resultsBag.Add(new QueryResponseObject
-                            {
-                                Id = result.Id,
-                                IdPost = result.Index,
-                                Index = queryObj.Index,
-                                Similarity = result.SimilarityRate,
-                                Chunk = chunk
-                            });
-                        }
+                            Id = result.Id,
+                            IdPost = result.Index,
+                            Index = queryObj.Index,
+                            Similarity = result.SimilarityRate,
+                            Chunk = chunk
+                        });
                     }
                 }
             }
