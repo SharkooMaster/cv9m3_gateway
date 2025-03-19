@@ -48,7 +48,7 @@ public static class AgnetaHandler
         else
         {
             PushoverHandler.PushNotification($"Gateway:{Globals.GATEWAY_ID}:Failed to send log to agneta. No service running");
-            //Console.Writeline("ERROR::AgnetaHandler.Log: No service running");
+            Console.WriteLine("ERROR::AgnetaHandler.Log: No service running");
         }
     }
 
