@@ -89,6 +89,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
             if (res.Results.Count == 0)
             {
+                Console.WriteLine("res.res.cnt 0");
                 // Save
                 StoreVector_Req svecReq = new StoreVector_Req
                 {
@@ -118,6 +119,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             }
             else
             {
+                Console.WriteLine("res.res.cnt more than 0");
                 foreach (var result in res.Results)
                 {
                     if (result.SimilarityRate >= Globals.MinThresh)
