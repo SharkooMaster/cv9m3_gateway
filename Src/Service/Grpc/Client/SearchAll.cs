@@ -65,7 +65,17 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 searchReq.Vector.AddRange(req.Vector);
 
                 SearchVector_Result _res = await Globals.svs.ClientGet(searchReq, Globals.AgentsLoadbalancer);
-                    searchResults.Add(_res);
+
+                string route_ip = _res.TargetIp;
+                bool reroute = _res.Forward;
+                while (reroute)
+                {
+                    await AgnetaHandler.Log(1, $"Rerouting search to: {route_ip}");
+                    _res = await Globals.svs.ClientGet(searchReq, route_ip);
+                    route_ip = _res.TargetIp;
+                    reroute = _res.Forward;
+                }
+                searchResults.Add(_res);
 
                 if (searchReq.Bitstring == req.Bitstring)
                 {
