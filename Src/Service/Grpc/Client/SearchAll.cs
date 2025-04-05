@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Gateway.Modules;
 using Gateway.Modules.Agneta;
 using Gateway.Utils.Globals;
 using Gateway.Utils.Misc;
@@ -12,7 +13,6 @@ using Grpc.Core;
 using Microsoft.AspNetCore.Server.HttpSys;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using Xunit.Sdk;
 
 namespace Gateway.Services.Grpc;
 
@@ -21,13 +21,21 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
         QueryResponse response = new QueryResponse();
-        return response;
         //List<QueryResponseObject> resultsBag = new List<QueryResponseObject>();
         ConcurrentBag<QueryResponseObject> resultsBag = new ConcurrentBag<QueryResponseObject>();
+        string _headID = "";
 
         // Create a list of tasks to execute in parallel
         var searchTasks = request.QueryObjects.Select(async (queryObj, index) =>
         {
+            string headID = queryObj.HeadRouteID;
+            if(_headID == ""){ _headID = headID; }
+
+            await ClmsHandler.RegisterRoutePoint(headID, "Gateway", "A1");
+            await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+            {
+                level = "1", stepName = "SearchAll:Start", type = "step", message = $"Preparing search_vector_request {index}"
+            });
             SearchVector_Req req = new SearchVector_Req
             {
                 Bitstring = queryObj.BucketString,
@@ -35,6 +43,11 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 MinimumSimilarity = Globals.MinThresh
             };
             req.Vector.AddRange(queryObj.Vector);
+
+            await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+            {
+                level = "1", stepName = "SearchAll:Preprocessing", type = "step", message = $"Created search_vector_request {index}, generating bitflipped variations"
+            });
 
             // Generate bit-flipped variations
             List<string> bitFlippedStrings = new List<string>();
@@ -49,6 +62,10 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             {
                 bitFlippedStrings.Add(req.Bitstring);
             }
+            await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+            {
+                level = "1", stepName = "SearchAll:Preprocessing", type = "step", message = $"Done generating bitflipped variations {index}, Preparing parallel searches"
+            });
 
             Stopwatch sw = Stopwatch.StartNew();
             string _target_ip = "";
@@ -65,12 +82,24 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 };
                 searchReq.Vector.AddRange(req.Vector);
 
+                await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+                {
+                    level = "1", stepName = "SearchAll:Searching", type = "forward", message = $"Sending searchRequest for each bucket {flippedBitstring}"
+                });
                 SearchVector_Result _res = await Globals.svs.ClientGet(searchReq, Globals.AgentsLoadbalancer);
+                await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+                {
+                    level = "1", stepName = "SearchAll:Searched", type = "step", message = $"Recieved search result {flippedBitstring}"
+                });
 
                 string route_ip = _res.TargetIp;
                 bool reroute = _res.Forward;
                 while (reroute)
                 {
+                    await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+                    {
+                        level = "1", stepName = "SearchAll:Searched", type = "step", message = $"Rerouting search to {route_ip} | {flippedBitstring}"
+                    });
                     await AgnetaHandler.Log(1, $"Rerouting search to: {route_ip}");
                     _res = await Globals.svs.ClientGet(searchReq, route_ip);
                     route_ip = _res.TargetIp;
@@ -85,6 +114,10 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             }).ToList();
 
             await Task.WhenAll(searchVectorTasks); // Properly await parallel searches
+            await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+            {
+                level = "1", stepName = "SearchAll:Searched", type = "step", message = $"Search tasks complete"
+            });
 
             SearchVector_Result res = new SearchVector_Result();
             foreach (var searchResult in searchResults)
@@ -95,11 +128,19 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
             sw.Stop();
             Console.WriteLine($"{index}: took {sw.ElapsedMilliseconds}ms to search for buckets");
+            await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+            {
+                level = "1", stepName = "SearchAll:Bucket search complete", type = "step", message = $"Buckets searched and results prepared"
+            });
 
             if (res.Results.Count == 0)
             {
                 Console.WriteLine("res.res.cnt 0");
                 // Save
+                await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+                {
+                    level = "1", stepName = "SearchAll:Storing", type = "step", message = $"Saving result {index}"
+                });
                 StoreVector_Req svecReq = new StoreVector_Req
                 {
                     TargetIp = res.TargetIp,
@@ -112,7 +153,15 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     chunk = Convert.ToBase64String(queryObj.Chunk.ToByteArray())
                 };
                 svecReq.Metadata = JsonConvert.SerializeObject(meta);
+                await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+                {
+                    level = "1", stepName = "SearchAll:Storing", type = "forward", message = $"Sending results to save {index}"
+                });
                 ulong vectorIndex = Globals.svec.Store(svecReq).Id;
+                await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+                {
+                    level = "1", stepName = "SearchAll:Storing", type = "step", message = $"Saved results {index}"
+                });
 
                 resultsBag.Add(new QueryResponseObject
                 {
@@ -125,6 +174,10 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             }
             else
             {
+                await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+                {
+                    level = "1", stepName = "SearchAll:Responding", type = "step", message = $"Results found, encoding {index}"
+                });
                 Console.WriteLine("res.res.cnt more than 0");
                 foreach (var result in res.Results)
                 {
@@ -148,6 +201,11 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         }).ToList();
 
         await Task.WhenAll(searchTasks); // Wait for all queries to finish
+        await ClmsHandler.AddEventToRoutePoint(_headID, new M_CLMSEvent()
+        {
+            level = "1", stepName = "SearchAll:Final", type = "response", message = "Done"
+        });
+        await ClmsHandler.SendRoutePoint(_headID);
 
         response.Results.AddRange(resultsBag);
         return response;
