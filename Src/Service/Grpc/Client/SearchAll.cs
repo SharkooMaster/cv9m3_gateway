@@ -75,7 +75,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 {
                     Bitstring = flippedBitstring,
                     K = Globals.K,
-                    MinimumSimilarity = Globals.MinThresh
+                    MinimumSimilarity = Globals.MinThresh,
+                    HeadRouteID = headID
                 };
                 searchReq.Vector.AddRange(req.Vector);
 
@@ -150,6 +151,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     chunk = Convert.ToBase64String(queryObj.Chunk.ToByteArray())
                 };
                 svecReq.Metadata = JsonConvert.SerializeObject(meta);
+
                 await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
                 {
                     level = "1", stepName = "SearchAll:Storing", type = "forward", message = $"Sending results to save {index}"
