@@ -142,7 +142,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 StoreVector_Req svecReq = new StoreVector_Req
                 {
                     TargetIp = res.TargetIp,
-                    Bitstring = req.Bitstring
+                    Bitstring = req.Bitstring,
+                    HeadRouteID = headID
                 };
                 svecReq.Vector.AddRange(req.Vector);
 
