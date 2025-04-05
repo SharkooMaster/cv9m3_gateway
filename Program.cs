@@ -15,6 +15,8 @@ using System.Buffers;
 using Gateway.Services.PushOver;
 using Gateway.Modules.Pushover;
 using Gateway.Utils.Globals;
+using Gateway.Modules;
+using Gateway.Services.Clms;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -41,6 +43,9 @@ builder.Services.AddSwaggerGen();
 // builder.Services.AddHostedService<GatewayRuntimeService>();
 
 var app = builder.Build();
+
+var clmsClientService = app.Services.GetRequiredService<ClmsClientService>();
+ClmsHandler.SetClmsInstance(clmsClientService);
 
 var pushoverClientService = app.Services.GetRequiredService<PushoverClientService>();
 PushoverHandler.SetInstance(pushoverClientService);
@@ -75,6 +80,7 @@ Console.WriteLine("Connection closed with AgnetaClientService");
 
 void ConfigureServices(IServiceCollection services)
 {
+    services.AddSingleton<ClmsClientService>(new ClmsClientService());
     services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://192.168.50.240:443/log/ws"));
     //services.AddSingleton<AgnetaClientService>(new AgnetaClientService("wss://localhost:8080/log/ws"));
     services.AddSingleton<PushoverClientService>(new PushoverClientService());
