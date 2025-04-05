@@ -8,6 +8,7 @@ service GatewayService {
 
 message QueryRequest {
     repeated QueryObject queryObjects = 1;
+    string HeadRouteID = 2;
 }
 
 message QueryResponse {
@@ -22,7 +23,6 @@ message QueryObject
     bytes chunk = 4;
     int32 index = 5;
     bool isNeighbour = 6;
-    string HeadRouteID = 7;
 }
 
 message QueryResponseObject

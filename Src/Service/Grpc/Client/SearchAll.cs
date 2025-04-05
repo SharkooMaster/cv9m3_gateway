@@ -23,15 +23,12 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         QueryResponse response = new QueryResponse();
         //List<QueryResponseObject> resultsBag = new List<QueryResponseObject>();
         ConcurrentBag<QueryResponseObject> resultsBag = new ConcurrentBag<QueryResponseObject>();
-        string _headID = "";
+        string headID = request.HeadRouteID;
+        await ClmsHandler.RegisterRoutePoint(headID, "Gateway", "A1");
 
         // Create a list of tasks to execute in parallel
         var searchTasks = request.QueryObjects.Select(async (queryObj, index) =>
         {
-            string headID = queryObj.HeadRouteID;
-            if(_headID == ""){ _headID = headID; }
-
-            await ClmsHandler.RegisterRoutePoint(headID, "Gateway", "A1");
             await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
             {
                 level = "1", stepName = "SearchAll:Start", type = "step", message = $"Preparing search_vector_request {index}"
@@ -201,11 +198,11 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         }).ToList();
 
         await Task.WhenAll(searchTasks); // Wait for all queries to finish
-        await ClmsHandler.AddEventToRoutePoint(_headID, new M_CLMSEvent()
+        await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
         {
             level = "1", stepName = "SearchAll:Final", type = "response", message = "Done"
         });
-        await ClmsHandler.SendRoutePoint(_headID);
+        await ClmsHandler.SendRoutePoint(headID);
 
         response.Results.AddRange(resultsBag);
         return response;
