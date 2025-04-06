@@ -84,30 +84,41 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 {
                     level = "1", stepName = "SearchAll:Searching", type = "forward", message = $"Sending searchRequest for each bucket {flippedBitstring}"
                 });
-                SearchVector_Result _res = await Globals.svs.ClientGet(searchReq, Globals.AgentsLoadbalancer);
-                await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+                try
                 {
-                    level = "1", stepName = "SearchAll:Searched", type = "step", message = $"Recieved search result {flippedBitstring}"
-                });
+                    SearchVector_Result _res = await Globals.svs.ClientGet(searchReq, Globals.AgentsLoadbalancer);
+                    await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+                    {
+                        level = "1", stepName = "SearchAll:Searched", type = "step", message = $"Recieved search result {flippedBitstring}"
+                    });
 
-                string route_ip = _res.TargetIp;
-                bool reroute = _res.Forward;
-                while (reroute)
+                    string route_ip = _res.TargetIp;
+                    bool reroute = _res.Forward;
+                    while (reroute)
+                    {
+                        await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
+                        {
+                            level = "1", stepName = "SearchAll:Searched", type = "step", message = $"Rerouting search to {route_ip} | {flippedBitstring}"
+                        });
+                        await AgnetaHandler.Log(1, $"Rerouting search to: {route_ip}");
+                        _res = await Globals.svs.ClientGet(searchReq, route_ip);
+                        route_ip = _res.TargetIp;
+                        reroute = _res.Forward;
+                    }
+                    searchResults.Add(_res);
+
+                    if (searchReq.Bitstring == req.Bitstring)
+                    {
+                        _target_ip = _res.TargetIp;
+                    }
+                }
+                catch (Exception ex)
                 {
                     await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
                     {
-                        level = "1", stepName = "SearchAll:Searched", type = "step", message = $"Rerouting search to {route_ip} | {flippedBitstring}"
+                        level = "3", stepName = "SearchAll:FailedToSearch", type = "step", message = $"Request to search for vector failed"
                     });
-                    await AgnetaHandler.Log(1, $"Rerouting search to: {route_ip}");
-                    _res = await Globals.svs.ClientGet(searchReq, route_ip);
-                    route_ip = _res.TargetIp;
-                    reroute = _res.Forward;
-                }
-                searchResults.Add(_res);
-
-                if (searchReq.Bitstring == req.Bitstring)
-                {
-                    _target_ip = _res.TargetIp;
+                    return response;
                 }
             }).ToList();
 
