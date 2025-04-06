@@ -116,7 +116,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 {
                     await ClmsHandler.AddEventToRoutePoint(headID, new M_CLMSEvent()
                     {
-                        level = "3", stepName = "SearchAll:FailedToSearch", type = "step", message = $"Request to search for vector failed"
+                        level = "3", stepName = "SearchAll:FailedToSearch", type = "step", message = $"Request to search for vector failed: {ex.Message} : {ex.Data}"
                     });
                     await ClmsHandler.SendRoutePoint(headID);
                     throw;
