@@ -48,7 +48,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
             // Generate bit-flipped variations
             List<string> bitFlippedStrings = new List<string>();
-            for (int j = 0; j < 64; j++)
+            for (int j = 0; j < Globals.K; j++)
             {
                 char[] modifiedBits = req.Bitstring.ToCharArray();
                 modifiedBits[j] = (modifiedBits[j] == '0') ? '1' : '0';
