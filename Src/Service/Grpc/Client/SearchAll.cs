@@ -118,7 +118,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     {
                         level = "3", stepName = "SearchAll:FailedToSearch", type = "step", message = $"Request to search for vector failed"
                     });
-                    return response;
+                    await ClmsHandler.SendRoutePoint(headID);
+                    throw;
                 }
             }).ToList();
 
