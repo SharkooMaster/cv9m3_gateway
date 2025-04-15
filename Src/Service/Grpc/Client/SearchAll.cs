@@ -22,7 +22,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
     private async Task initCLMS(string _name, string _id)
     {
-        headID = await ClmsHandler.RegisterHeadRoute();
         await ClmsHandler.RegisterRoutePoint(headID, _name, _id);
     }
 
@@ -50,6 +49,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
+        headID = request.HeadRouteID;
         await initCLMS("Gateway", "A2");
 
         QueryResponse response = new QueryResponse();
