@@ -171,6 +171,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         {
             Console.WriteLine(exc);
             PushoverHandler.PushNotification($"Error, gateway process failed: {exc.Data} | {exc.Message}");
+            throw;
         }
     }
 
