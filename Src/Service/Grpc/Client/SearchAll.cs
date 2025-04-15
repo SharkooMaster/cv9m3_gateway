@@ -43,6 +43,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             modifiedBits[j] = (modifiedBits[j] == '0') ? '1' : '0';
             bitFlippedStrings.Add(new string(modifiedBits));
         }
+        bitFlippedStrings.Add(_bitString);
 
         return bitFlippedStrings;
     }
@@ -58,7 +59,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         QueryObject req = request.QueryObjects[0];
         List<string> neighbouringBuckets = GetNeighbouringBuckets(req.BucketString);
         ConcurrentBag<SearchVectorObject> searchResults = new ConcurrentBag<SearchVectorObject>();
-        string targetIP = "";
+        string targetIP = Globals.AgentsLoadbalancer;
 
         ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = 4 };
         await Parallel.ForAsync(0, neighbouringBuckets.Count, options, async (i, ct) => {
