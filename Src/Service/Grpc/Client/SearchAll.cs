@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Gateway.Modules;
 using Gateway.Modules.Agneta;
+using Gateway.Modules.Pushover;
 using Gateway.Utils.Globals;
 using Gateway.Utils.Misc;
 using GatewayService;
@@ -49,120 +50,128 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
-        headID = request.HeadRouteID;
-        await initCLMS("Gateway", "A2");
+        try
+        {
+            headID = request.HeadRouteID;
+            await initCLMS("Gateway", "A2");
 
-        QueryResponse response = new QueryResponse();
-        ConcurrentBag<QueryResponseObject> resultsBag = new ConcurrentBag<QueryResponseObject>();
+            QueryResponse response = new QueryResponse();
+            ConcurrentBag<QueryResponseObject> resultsBag = new ConcurrentBag<QueryResponseObject>();
 
-        // get neighbour buckets
-        QueryObject req = request.QueryObjects[0];
-        List<string> neighbouringBuckets = GetNeighbouringBuckets(req.BucketString);
-        ConcurrentBag<SearchVectorObject> searchResults = new ConcurrentBag<SearchVectorObject>();
-        string targetIP = Globals.AgentsLoadbalancer;
+            // get neighbour buckets
+            QueryObject req = request.QueryObjects[0];
+            List<string> neighbouringBuckets = GetNeighbouringBuckets(req.BucketString);
+            ConcurrentBag<SearchVectorObject> searchResults = new ConcurrentBag<SearchVectorObject>();
+            string targetIP = Globals.AgentsLoadbalancer;
 
-        ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = 4 };
-        await Parallel.ForAsync(0, neighbouringBuckets.Count, options, async (i, ct) => {
-            await addEvent("SearchAll:Start", $"Preparing search_vector_request {i}" );
+            ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = 4 };
+            await Parallel.ForAsync(0, neighbouringBuckets.Count, options, async (i, ct) => {
+                await addEvent("SearchAll:Start", $"Preparing search_vector_request {i}" );
 
-            SearchVector_Req searchReq = new SearchVector_Req
-            {
-                Bitstring = neighbouringBuckets[i],
-                K = Globals.K,
-                MinimumSimilarity = Globals.MinThresh,
-                HeadRouteID = headID
-            };
-            searchReq.Vector.AddRange(req.Vector);
-            
-            // Searching
-            try
-            {
-                SearchVector_Result? _res = null;
-                string route_ip = Globals.AgentsLoadbalancer;
-                bool reroute = true;
-                while (reroute)
+                SearchVector_Req searchReq = new SearchVector_Req
                 {
-                    await addEvent("SearchAll:Searching", $"Routing search to {route_ip} | {neighbouringBuckets[i]}");
-                    _res = await Globals.svs.ClientGet(searchReq, route_ip);
+                    Bitstring = neighbouringBuckets[i],
+                    K = Globals.K,
+                    MinimumSimilarity = Globals.MinThresh,
+                    HeadRouteID = headID
+                };
+                searchReq.Vector.AddRange(req.Vector);
 
-                    route_ip = _res.TargetIp;
-                    reroute = _res.Forward;
-                    if(searchReq.Bitstring == req.BucketString){ targetIP = route_ip; }
-                }
-                if(_res != null)
+                // Searching
+                try
                 {
-                    foreach (var res in _res.Results)
+                    SearchVector_Result? _res = null;
+                    string route_ip = Globals.AgentsLoadbalancer;
+                    bool reroute = true;
+                    while (reroute)
                     {
-                        searchResults.Add(res);
+                        await addEvent("SearchAll:Searching", $"Routing search to {route_ip} | {neighbouringBuckets[i]}");
+                        _res = await Globals.svs.ClientGet(searchReq, route_ip);
+
+                        route_ip = _res.TargetIp;
+                        reroute = _res.Forward;
+                        if(searchReq.Bitstring == req.BucketString){ targetIP = route_ip; }
+                    }
+                    if(_res != null)
+                    {
+                        foreach (var res in _res.Results)
+                        {
+                            searchResults.Add(res);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await addEvent("SearchAll:FailedToSearch", $"Request to search for vector failed: {ex.Message} : {ex.Data}");
+                    await ClmsHandler.SendRoutePoint(headID);
+                    throw;
+                }
+            });
+
+            if(searchResults.Count == 0)
+            {
+                await addEvent("Searched:Nothing Found", "No result found. Saving");
+                StoreVector_Req svecReq = new StoreVector_Req
+                {
+                    TargetIp = targetIP,
+                    Bitstring = req.BucketString,
+                    HeadRouteID = headID
+                };
+                svecReq.Vector.AddRange(req.Vector);
+
+                M_Meta meta = new M_Meta
+                {
+                    chunk = Convert.ToBase64String(req.Chunk.ToByteArray())
+                };
+                svecReq.Metadata = JsonConvert.SerializeObject(meta);
+
+                await addEvent("Searched:Storing", $"Sending results to save");
+                ulong vectorIndex = Globals.svec.Store(svecReq).Id;
+                await addEvent("Searched:Storing", $"Saved results");
+
+                resultsBag.Add(new QueryResponseObject
+                {
+                    Id = Convert.ToUInt64(req.BucketString, 2),
+                    IdPost = vectorIndex,
+                    Index = req.Index,
+                    Similarity = 1,
+                    Chunk = req.Chunk
+                });
+            }
+            else
+            {
+                await addEvent("Searched:Found", "Result found");
+                foreach (var result in searchResults)
+                {
+                    if (result.SimilarityRate >= Globals.MinThresh)
+                    {
+                        JObject meta = JObject.Parse(result.Metadata);
+                        Google.Protobuf.ByteString chunk = ByteString.CopyFrom(
+                            Convert.FromBase64String(meta["chunk"]?.ToString()));
+
+                        resultsBag.Add(new QueryResponseObject
+                        {
+                            Id = result.Id,
+                            IdPost = result.Index,
+                            Index = request.QueryObjects[0].Index,
+                            Similarity = result.SimilarityRate,
+                            Chunk = chunk
+                        });
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                await addEvent("SearchAll:FailedToSearch", $"Request to search for vector failed: {ex.Message} : {ex.Data}");
-                await ClmsHandler.SendRoutePoint(headID);
-                throw;
-            }
-        });
 
-        if(searchResults.Count == 0)
-        {
-            await addEvent("Searched:Nothing Found", "No result found. Saving");
-            StoreVector_Req svecReq = new StoreVector_Req
-            {
-                TargetIp = targetIP,
-                Bitstring = req.BucketString,
-                HeadRouteID = headID
-            };
-            svecReq.Vector.AddRange(req.Vector);
+            await addEvent("SearchAll:Final", "Done");
+            await ClmsHandler.SendRoutePoint(headID);
 
-            M_Meta meta = new M_Meta
-            {
-                chunk = Convert.ToBase64String(req.Chunk.ToByteArray())
-            };
-            svecReq.Metadata = JsonConvert.SerializeObject(meta);
-
-            await addEvent("Searched:Storing", $"Sending results to save");
-            ulong vectorIndex = Globals.svec.Store(svecReq).Id;
-            await addEvent("Searched:Storing", $"Saved results");
-
-            resultsBag.Add(new QueryResponseObject
-            {
-                Id = Convert.ToUInt64(req.BucketString, 2),
-                IdPost = vectorIndex,
-                Index = req.Index,
-                Similarity = 1,
-                Chunk = req.Chunk
-            });
+            response.Results.AddRange(resultsBag);
+            return response;
         }
-        else
+        catch(Exception exc)
         {
-            await addEvent("Searched:Found", "Result found");
-            foreach (var result in searchResults)
-            {
-                if (result.SimilarityRate >= Globals.MinThresh)
-                {
-                    JObject meta = JObject.Parse(result.Metadata);
-                    Google.Protobuf.ByteString chunk = ByteString.CopyFrom(
-                        Convert.FromBase64String(meta["chunk"]?.ToString()));
-
-                    resultsBag.Add(new QueryResponseObject
-                    {
-                        Id = result.Id,
-                        IdPost = result.Index,
-                        Index = request.QueryObjects[0].Index,
-                        Similarity = result.SimilarityRate,
-                        Chunk = chunk
-                    });
-                }
-            }
+            Console.WriteLine(exc);
+            PushoverHandler.PushNotification($"Error, gateway process failed: {exc.Data} | {exc.Message}");
         }
-
-        await addEvent("SearchAll:Final", "Done");
-        await ClmsHandler.SendRoutePoint(headID);
-
-        response.Results.AddRange(resultsBag);
-        return response;
     }
 
 }

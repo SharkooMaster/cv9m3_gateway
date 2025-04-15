@@ -30,7 +30,7 @@ public class ClmsClientService : ICLMSClientService
     {
         if(!routePoints.TryAdd(_headRouteID, new M_RoutePoint() { HeadRouteID = _headRouteID, NodeName = _name, NodeID = _id, Status = "Running"}))
         {
-            Console.WriteLine("Failed to register RoutePoint");
+            // Console.WriteLine("Failed to register RoutePoint");
         }
     }
 
