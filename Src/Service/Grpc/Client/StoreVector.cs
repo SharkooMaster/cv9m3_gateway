@@ -13,10 +13,11 @@ public class StoreVectorService : StoreVector.StoreVectorClient
     {
         try
         {
-            var channel = GrpcChannel.ForAddress($"http://{request.TargetIp}:5000", Globals.GRPC_OPTIONS);
+            var channel = GrpcChannelFactory.GetChannel(request.TargetIp);
             StoreVector.StoreVectorClient _client = new StoreVector.StoreVectorClient(channel);
 
-            return _client.Store(request);
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            return _client.Store(request, deadline: deadline);
         }
         catch(RpcException ex)
         {

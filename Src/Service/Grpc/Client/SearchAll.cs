@@ -86,7 +86,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     while (reroute)
                     {
                         await addEvent("SearchAll:Searching", $"Routing search to {route_ip} | {neighbouringBuckets[i]}");
-                        _res = await Globals.svs.ClientGet(searchReq, route_ip);
+                        _res = await Globals.svs.ClientGet(searchReq, route_ip, context.CancellationToken);
 
                         route_ip = _res.TargetIp;
                         reroute = _res.Forward;
@@ -126,7 +126,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 svecReq.Metadata = JsonConvert.SerializeObject(meta);
 
                 await addEvent("Searched:Storing", $"Sending results to save");
-                ulong vectorIndex = Globals.svec.Store(svecReq).Id;
+                ulong vectorIndex = Globals.svec.Store(svecReq, cancellationToken: context.CancellationToken).Id;
                 await addEvent("Searched:Storing", $"Saved results");
 
                 resultsBag.Add(new QueryResponseObject
