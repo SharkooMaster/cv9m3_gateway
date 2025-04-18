@@ -15,7 +15,7 @@ public class SearchVectorService : SearchVector.SearchVectorClient
             GrpcChannel? channel = null;
             if(_ip == Globals.AgentsLoadbalancer)
             {
-                channel = GrpcChannelFactory.GetChannel(_ip, ":80");
+                channel = GrpcChannelFactory.GetChannel(_ip, "80");
             }
             else
             {
