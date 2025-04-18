@@ -64,7 +64,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             ConcurrentBag<SearchVectorObject> searchResults = new ConcurrentBag<SearchVectorObject>();
             string targetIP = Globals.AgentsLoadbalancer;
 
-            ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = 4 };
+            ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = Math.Min(neighbouringBuckets.Count, Environment.ProcessorCount * 2) };
             await Parallel.ForAsync(0, neighbouringBuckets.Count, options, async (i, ct) => {
                 await addEvent("SearchAll:Start", $"Preparing search_vector_request {i}" );
 
