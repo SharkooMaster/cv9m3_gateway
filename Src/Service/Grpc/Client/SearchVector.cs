@@ -8,21 +8,11 @@ namespace Gateway.Services.Grpc;
 
 public class SearchVectorService : SearchVector.SearchVectorClient
 {
-    public async Task<SearchVector_Result> ClientGet(SearchVector_Req req, string _ip, CancellationToken ct = default)
+    public async Task<SearchVector_Result> ClientGet(SearchVector_Req req, string _ip, string _port = "5000", CancellationToken ct = default)
     {
         try
         {
-            GrpcChannel? channel = null;
-            if(_ip == Globals.AgentsLoadbalancer)
-            {
-                channel = GrpcChannelFactory.GetChannel(_ip, "80");
-            }
-            else
-            {
-                channel = GrpcChannelFactory.GetChannel(_ip);
-            }
-
-            SearchVector.SearchVectorClient _client = new SearchVector.SearchVectorClient(channel);
+            var _client = GrpcChannelFactory.GetClient(ip: _ip, chan => new SearchVector.SearchVectorClient(chan));
 
             var deadline = DateTime.UtcNow.AddSeconds(5);
             return await _client.GetAsync(req, deadline: deadline, cancellationToken: ct);

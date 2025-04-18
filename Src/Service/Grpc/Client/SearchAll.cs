@@ -86,7 +86,12 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     while (reroute)
                     {
                         await addEvent("SearchAll:Searching", $"Routing search to {route_ip} | {neighbouringBuckets[i]}");
-                        _res = await Globals.svs.ClientGet(searchReq, route_ip, context.CancellationToken);
+                        _res = await Globals.svs.ClientGet(
+                            searchReq,
+                            route_ip,
+                            (route_ip == Globals.AgentsLoadbalancer) ? "80" : "5000",
+                            context.CancellationToken
+                        );
 
                         route_ip = _res.TargetIp;
                         reroute = _res.Forward;
