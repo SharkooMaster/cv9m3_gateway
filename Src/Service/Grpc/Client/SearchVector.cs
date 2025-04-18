@@ -12,10 +12,14 @@ public class SearchVectorService : SearchVector.SearchVectorClient
     {
         try
         {
-            var channel = GrpcChannelFactory.GetChannel(_ip);
+            GrpcChannel? channel = null;
             if(_ip == Globals.AgentsLoadbalancer)
             {
-                channel = GrpcChannelFactory.GetChannel(_ip, "");
+                channel = GrpcChannelFactory.GetChannel(_ip, ":80");
+            }
+            else
+            {
+                channel = GrpcChannelFactory.GetChannel(_ip);
             }
 
             SearchVector.SearchVectorClient _client = new SearchVector.SearchVectorClient(channel);
