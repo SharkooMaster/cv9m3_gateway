@@ -66,7 +66,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
             ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = Math.Min(neighbouringBuckets.Count, Environment.ProcessorCount * 2) };
             await Parallel.ForAsync(0, neighbouringBuckets.Count, options, async (i, ct) => {
-                await addEvent("SearchAll:Start", $"Preparing search_vector_request {i}" );
+                _ = addEvent("SearchAll:Start", $"Preparing search_vector_request {i}" );
 
                 SearchVector_Req searchReq = new SearchVector_Req
                 {
@@ -85,7 +85,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     bool reroute = true;
                     while (reroute)
                     {
-                        await addEvent("SearchAll:Searching", $"Routing search to {route_ip} | {neighbouringBuckets[i]}");
+                        _ = addEvent("SearchAll:Searching", $"Routing search to {route_ip} | {neighbouringBuckets[i]}");
                         _res = await Globals.svs.ClientGet(
                             searchReq,
                             route_ip,
@@ -107,7 +107,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 }
                 catch (Exception ex)
                 {
-                    await addEvent("SearchAll:FailedToSearch", $"Request to search for vector failed: {ex.Message} : {ex.Data}");
+                    _ = addEvent("SearchAll:FailedToSearch", $"Request to search for vector failed: {ex.Message} : {ex.Data}");
                     await ClmsHandler.SendRoutePoint(headID);
                     throw;
                 }
@@ -115,7 +115,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
             if(searchResults.Count == 0)
             {
-                await addEvent("Searched:Nothing Found", "No result found. Saving");
+                _ = addEvent("Searched:Nothing Found", "No result found. Saving");
                 StoreVector_Req svecReq = new StoreVector_Req
                 {
                     TargetIp = targetIP,
@@ -130,9 +130,9 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 };
                 svecReq.Metadata = JsonConvert.SerializeObject(meta);
 
-                await addEvent("Searched:Storing", $"Sending results to save");
+                _ = addEvent("Searched:Storing", $"Sending results to save");
                 ulong vectorIndex = Globals.svec.Store(svecReq, cancellationToken: context.CancellationToken).Id;
-                await addEvent("Searched:Storing", $"Saved results");
+                _ = addEvent("Searched:Storing", $"Saved results");
 
                 resultsBag.Add(new QueryResponseObject
                 {
@@ -145,7 +145,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             }
             else
             {
-                await addEvent("Searched:Found", "Result found");
+                _ = addEvent("Searched:Found", "Result found");
                 foreach (var result in searchResults)
                 {
                     if (result.SimilarityRate >= Globals.MinThresh)
@@ -166,7 +166,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 }
             }
 
-            await addEvent("SearchAll:Final", "Done");
+            _ = addEvent("SearchAll:Final", "Done");
             await ClmsHandler.SendRoutePoint(headID);
 
             response.Results.AddRange(resultsBag);
