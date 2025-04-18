@@ -13,6 +13,11 @@ public class SearchVectorService : SearchVector.SearchVectorClient
         try
         {
             var channel = GrpcChannelFactory.GetChannel(_ip);
+            if(_ip == Globals.AgentsLoadbalancer)
+            {
+                channel = GrpcChannelFactory.GetChannel(_ip, "");
+            }
+
             SearchVector.SearchVectorClient _client = new SearchVector.SearchVectorClient(channel);
 
             var deadline = DateTime.UtcNow.AddSeconds(5);

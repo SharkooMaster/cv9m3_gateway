@@ -13,7 +13,7 @@ public class StoreVectorService : StoreVector.StoreVectorClient
     {
         try
         {
-            var channel = GrpcChannelFactory.GetChannel(request.TargetIp);
+            var channel = GrpcChannelFactory.GetChannel(request.TargetIp, "5000");
             StoreVector.StoreVectorClient _client = new StoreVector.StoreVectorClient(channel);
 
             var deadline = DateTime.UtcNow.AddSeconds(5);
