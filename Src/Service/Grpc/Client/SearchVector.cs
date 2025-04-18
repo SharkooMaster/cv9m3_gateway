@@ -12,7 +12,7 @@ public class SearchVectorService : SearchVector.SearchVectorClient
     {
         try
         {
-            var _client = GrpcChannelFactory.GetClient(ip: _ip, chan => new SearchVector.SearchVectorClient(chan));
+            var _client = GrpcChannelFactory.GetClient(ip: _ip, chan => new SearchVector.SearchVectorClient(chan), port: _port);
 
             var deadline = DateTime.UtcNow.AddSeconds(5);
             return await _client.GetAsync(req, deadline: deadline, cancellationToken: ct);
