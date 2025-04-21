@@ -13,7 +13,11 @@ public class StoreVectorService : StoreVector.StoreVectorClient
     {
         try
         {
-            var _client = GrpcChannelFactory.GetClient(ip: request.TargetIp, chan => new StoreVector.StoreVectorClient(chan), port: "5000");
+            var _client = GrpcChannelFactory.GetClient(
+                target: request.TargetIp,
+                ctor: chan => new StoreVector.StoreVectorClient(chan),
+                roundRobin: false
+            );
 
             var deadline = DateTime.UtcNow.AddSeconds(5);
             return _client.Store(request, deadline: deadline);
