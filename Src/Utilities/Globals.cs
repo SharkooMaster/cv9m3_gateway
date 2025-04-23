@@ -20,7 +20,7 @@ public static class Globals
     public static int K = 12;
 
     // AGENTS_CONFIG
-    public static string AgentsLoadbalancer = "192.168.50.243";
+    public static string AgentsLoadbalancer = "agent-headless.default.svc.cluster.local";
     public static SearchVectorService svs = new SearchVectorService();
     public static StoreVectorService svec = new StoreVectorService();
 
