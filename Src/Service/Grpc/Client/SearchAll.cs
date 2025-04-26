@@ -122,11 +122,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 };
                 svecReq.Vector.AddRange(req.Vector);
 
-                M_Meta meta = new M_Meta
-                {
-                    chunk = Convert.ToBase64String(req.Chunk.ToByteArray())
-                };
-                svecReq.Metadata = JsonConvert.SerializeObject(meta);
+                svecReq.Chunk = req.Chunk;
 
                 _ = addEvent("Searched:Storing", $"Sending results to save", headID);
                 ulong vectorIndex = Globals.svec.Store(svecReq, cancellationToken: context.CancellationToken).Id;
@@ -134,8 +130,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
                 resultsBag.Add(new QueryResponseObject
                 {
-                    Id = Convert.ToUInt64(req.BucketString, 2),
-                    IdPost = vectorIndex,
+                    Id = req.Id,
                     Index = req.Index,
                     Similarity = 1,
                     Chunk = req.Chunk
@@ -148,17 +143,12 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 {
                     if (result.SimilarityRate >= Globals.MinThresh)
                     {
-                        JObject meta = JObject.Parse(result.Metadata);
-                        Google.Protobuf.ByteString chunk = ByteString.CopyFrom(
-                            Convert.FromBase64String(meta["chunk"]?.ToString()));
-
                         resultsBag.Add(new QueryResponseObject
                         {
                             Id = result.Id,
-                            IdPost = result.Index,
                             Index = request.QueryObjects[0].Index,
                             Similarity = result.SimilarityRate,
-                            Chunk = chunk
+                            Chunk = result.Chunk
                         });
                     }
                 }
