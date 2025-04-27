@@ -55,6 +55,7 @@ public static class AgnetaHandler
 
     public static async Task Close()
     {
+        return;
         await _instance.SendCloseAsync();
     }
 }
