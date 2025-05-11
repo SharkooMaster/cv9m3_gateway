@@ -31,22 +31,59 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         });
     }
 
-    private List<string> GetNeighbouringBuckets(string _bitString)
+    private List<string> GetNeighbouringBuckets(string bitString)
     {
-        // Generate bit-flipped variations
-        List<string> bitFlippedStrings = new List<string>();
-        for (int j = 0; j < Globals.K; j++)
-        {
-            char[] modifiedBits = _bitString.ToCharArray();
-            modifiedBits[j] = (modifiedBits[j] == '0') ? '1' : '0';
-            bitFlippedStrings.Add(new string(modifiedBits));
-        }
-        bitFlippedStrings.Add(_bitString);
+        List<string> results = new(Globals.K + 1);
+        char[] buffer = bitString.ToCharArray();
 
-        return bitFlippedStrings;
+        for (int i = 0; i < Globals.K; i++)
+        {
+            char original = buffer[i];
+            buffer[i] = (original == '0') ? '1' : '0';
+            results.Add(new string(buffer));
+            buffer[i] = original; // restore original bit
+        }
+
+        results.Add(bitString);
+        return results;
+    }
+
+    public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
+    {
+        QueryResponse response = new QueryResponse();
+
+        QueryObject req = request.QueryObjects[0];
+        List<string> neighbouringBuckets = GetNeighbouringBuckets(req.BucketString);
+
+        SearchVector_Reqs outgoingBatch = new SearchVector_Reqs();
+        for (int i = 0; i < request.QueryObjects.Count; i++)
+        {
+            SearchVector_Req searchReq = new SearchVector_Req
+            {
+                Bitstring = neighbouringBuckets[i],
+                K = Globals.K,
+                MinimumSimilarity = Globals.MinThresh,
+                HeadRouteID = ""
+            };
+            outgoingBatch.Reqs.Add(searchReq);
+        }
+        
+        Stopwatch sw = new Stopwatch();
+        sw.Start();
+
+        SearchVector_Results results = await Globals.svs.ClientGet(
+            outgoingBatch,
+            Globals.AgentsLoadbalancer,
+            "80",
+            context.CancellationToken
+        );
+        sw.Stop();
+        Console.WriteLine($"Time to search {sw.ElapsedMilliseconds}ms");
+
+        return response;
     }
     
-    public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
+/*     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
         try
         {
@@ -166,6 +203,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             PushoverHandler.PushNotification($"Error, gateway process failed: {exc.Data} | {exc.Message}");
             throw;
         }
-    }
+    } */
 
 }
