@@ -51,21 +51,26 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
         QueryResponse response = new QueryResponse();
-
-        QueryObject req = request.QueryObjects[0];
-        List<string> neighbouringBuckets = GetNeighbouringBuckets(req.BucketString);
-
+        
         SearchVector_Reqs outgoingBatch = new SearchVector_Reqs();
-        for (int i = 0; i < request.QueryObjects.Count; i++)
+
+        for (int j = 0; j < request.QueryObjects.Count; j++)
         {
-            SearchVector_Req searchReq = new SearchVector_Req
+            QueryObject req = request.QueryObjects[j];
+            List<string> neighbouringBuckets = GetNeighbouringBuckets(req.BucketString);
+
+            for (int i = 0; i < neighbouringBuckets.Count; i++)
             {
-                Bitstring = neighbouringBuckets[i],
-                K = Globals.K,
-                MinimumSimilarity = Globals.MinThresh,
-                HeadRouteID = ""
-            };
-            outgoingBatch.Reqs.Add(searchReq);
+                SearchVector_Req searchReq = new SearchVector_Req
+                {
+                    Bitstring = neighbouringBuckets[i],
+                    K = Globals.K,
+                    MinimumSimilarity = Globals.MinThresh,
+                    HeadRouteID = ""
+                };
+                outgoingBatch.Reqs.Add(searchReq);
+            }
+            req.Index = j;
         }
         
         Stopwatch sw = new Stopwatch();
