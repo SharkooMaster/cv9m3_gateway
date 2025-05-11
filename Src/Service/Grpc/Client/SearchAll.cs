@@ -66,7 +66,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     Bitstring = neighbouringBuckets[i],
                     K = Globals.K,
                     MinimumSimilarity = Globals.MinThresh,
-                    HeadRouteID = ""
+                    HeadRouteID = "",
+                    Index = j
                 };
                 searchReq.Vector.AddRange(req.Vector);
                 outgoingBatch.Reqs.Add(searchReq);
@@ -85,6 +86,50 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         sw.Stop();
         Console.WriteLine($"Time to search {sw.ElapsedMilliseconds}ms");
 
+        List<QueryResponseObject> resultsBag = new List<QueryResponseObject>();
+        List<SearchVector_Result> ToStore = new List<SearchVector_Result>();
+        for (int i = 0; i < results.Results.Count; i++)
+        {
+            SearchVector_Result current_result = results.Results[i];
+            if(current_result.Save)
+            {
+                ToStore.Add(current_result);
+
+                resultsBag.Add(new QueryResponseObject
+                {
+                    Id = current_result.Results[0].Id,
+                    Similarity = 1,
+                    Chunk = current_result.Results[0].Chunk,
+                    Index = current_result.Results[0].Index
+                });
+            }
+            else
+            {
+                foreach (var result in current_result.Results)
+                {
+                    if (result.SimilarityRate >= Globals.MinThresh)
+                    {
+                        resultsBag.Add(new QueryResponseObject
+                        {
+                            Id = result.Id,
+                            Index = current_result.Results[0].Index,
+                            Similarity = result.SimilarityRate,
+                            Chunk = result.Chunk
+                        });
+                    }
+                }
+            }
+        }
+        response.Results.AddRange(resultsBag);
+
+        // Store
+        for (int i = 0; i < ToStore.Count; i++)
+        {
+            _ = NetworkFileStorageHandler.StoreVector("", new M_Data() {
+                chunk = request.QueryObjects[ToStore[i].Results[0].Index].Chunk.ToArray(),
+                vector = request.QueryObjects[ToStore[i].Results[0].Index].Vector.ToArray()
+            });
+        }
         return response;
     }
     

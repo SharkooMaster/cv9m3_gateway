@@ -1,11 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Gateway.Utils.Globals;
 
 public class M_Data
 {
     public ulong id { get; set; }
     public float[] vector { get; set; }
-    public JsonElement metadata { get; set; }
+    public byte[] chunk { get; set; }
 
     public string ToJson()
     {

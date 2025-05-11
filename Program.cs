@@ -17,6 +17,7 @@ using Gateway.Modules.Pushover;
 using Gateway.Utils.Globals;
 using Gateway.Modules;
 using Gateway.Services.Clms;
+using Gateway.Services.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -76,6 +77,9 @@ app.UseRouting();
 app.MapGrpcService<GreeterService>();
 app.MapGrpcService<BatchSearchService>();
 app.MapGrpcService<SearchAllService>();
+
+var networkFileSystemService = app.Services.GetRequiredService<GcsSqlStorageService>(); // Drop in replacement for nfs with gcp
+NetworkFileStorageHandler.SetInstance(networkFileSystemService);
 
 app.MapGet("/", () =>
 {
