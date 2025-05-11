@@ -68,9 +68,9 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     MinimumSimilarity = Globals.MinThresh,
                     HeadRouteID = ""
                 };
+                searchReq.Vector.AddRange(req.Vector);
                 outgoingBatch.Reqs.Add(searchReq);
             }
-            req.Index = j;
         }
         
         Stopwatch sw = new Stopwatch();
