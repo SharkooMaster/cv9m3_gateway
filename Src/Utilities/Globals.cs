@@ -17,7 +17,7 @@ public static class Globals
     public static long   GATEWAY_LEASE_ID   = -1;
 
     public static float MinThresh = 0.6f;
-    public static int K = 64;
+    public static int K = 2;
 
     // AGENTS_CONFIG
     public static string AgentsLoadbalancer = "agent-headless.cross-test.svc.cluster.local";
