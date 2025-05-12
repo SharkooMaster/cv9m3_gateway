@@ -125,9 +125,12 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         // Store
         for (int i = 0; i < ToStore.Count; i++)
         {
+            byte[] _chunk = request.QueryObjects[ToStore[i].Results[0].Index].Chunk.ToArray();
+            float[] _vec = request.QueryObjects[ToStore[i].Results[0].Index].Vector.ToArray();
+
             _ = NetworkFileStorageHandler.StoreVector("", new M_Data() {
-                chunk = request.QueryObjects[ToStore[i].Results[0].Index].Chunk.ToArray(),
-                vector = request.QueryObjects[ToStore[i].Results[0].Index].Vector.ToArray()
+                chunk = _chunk,
+                vector = _vec
             });
         }
         return response;

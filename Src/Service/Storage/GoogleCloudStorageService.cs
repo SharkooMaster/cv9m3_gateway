@@ -64,7 +64,7 @@ public class GcsSqlStorageService : INetworkFileStorageService
             {
                 if (obj.Name == objectName)
                 {
-                    Console.WriteLine($"Chunk {hash} already exists in GCS.");
+                    Console.WriteLine($"Chunk {objectName} already exists in GCS.");
                     return false; // No need to store again
                 }
             }
