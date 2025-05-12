@@ -8,7 +8,7 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Logging;
-using Agent.Services.Grpc;
+using Gateway.Services.Grpc;
 using Gateway.Services.Agneta;
 using Gateway.Modules.Agneta;
 using System.Buffers;
@@ -100,4 +100,10 @@ void ConfigureServices(IServiceCollection services)
     services.AddSingleton<PushoverClientService>(new PushoverClientService());
     services.AddSingleton<QueryAgentService>();
     services.AddSingleton<StoreBucketRowAgentService>();
+    
+    services.AddSingleton<GcsSqlStorageService>(
+        new GcsSqlStorageService(
+            "cross-global-chunks"
+        )
+    );
 }

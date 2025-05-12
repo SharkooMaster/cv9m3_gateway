@@ -2,7 +2,7 @@ using Gateway.Utils.Globals;
 using Grpc.Net.Client;
 using TpInternalService;
 
-namespace Agent.Services.Grpc;
+namespace Gateway.Services.Grpc;
 
 public class QueryAgentService
 {

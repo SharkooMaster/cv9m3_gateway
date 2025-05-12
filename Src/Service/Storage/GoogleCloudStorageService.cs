@@ -22,13 +22,11 @@ public class GcsSqlStorageService : INetworkFileStorageService
 {
     private readonly StorageClient _storageClient;
     private readonly string _bucketName;
-    private readonly string _postgresConnectionString;
 
-    public GcsSqlStorageService(string bucketName, string postgresConnectionString)
+    public GcsSqlStorageService(string bucketName)
     {
         _storageClient = StorageClient.Create();
         _bucketName = bucketName;
-        _postgresConnectionString = postgresConnectionString;
     }
 
     public async Task StoreVector(string bucket_Id, M_Data data)
