@@ -53,10 +53,12 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         QueryResponse response = new QueryResponse();
         
         SearchVector_Reqs outgoingBatch = new SearchVector_Reqs();
+        Dictionary<int, QueryObject> indexedChunks = new Dictionary<int, QueryObject>();
 
         for (int j = 0; j < request.QueryObjects.Count; j++)
         {
             QueryObject req = request.QueryObjects[j];
+            indexedChunks.Add(req.Index, req);
             List<string> neighbouringBuckets = GetNeighbouringBuckets(req.BucketString);
 
             for (int i = 0; i < neighbouringBuckets.Count; i++)
@@ -99,7 +101,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 {
                     Id = current_result.Results[0].Id,
                     Similarity = 1,
-                    Chunk = current_result.Results[0].Chunk,
+                    Chunk = indexedChunks[current_result.Results[0].Index].Chunk,
                     Index = current_result.Results[0].Index
                 });
             }
