@@ -4,7 +4,7 @@ using TpInternalService;
 using Grpc.Net.Client;
 using Gateway.Utils.Globals;
 using Gateway.Modules.Agneta;
-using Agent.Services.Grpc;
+using Gateway.Services.Grpc;
 
 namespace Gateway.Services.Grpc;
 
