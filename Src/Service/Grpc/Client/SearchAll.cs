@@ -95,6 +95,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             SearchVector_Result current_result = results.Results[i];
             if(current_result.Save)
             {
+                Console.WriteLine("Saving 1");
                 ToStore.Add(current_result);
 
                 resultsBag.Add(new QueryResponseObject
@@ -111,12 +112,26 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 {
                     if (result.SimilarityRate >= Globals.MinThresh)
                     {
+                        Console.WriteLine("found");
                         resultsBag.Add(new QueryResponseObject
                         {
                             Id = result.Id,
                             Index = current_result.Results[0].Index,
                             Similarity = result.SimilarityRate,
                             Chunk = result.Chunk
+                        });
+                    }
+                    else
+                    {
+                        Console.WriteLine("Saving 2");
+                        ToStore.Add(current_result);
+
+                        resultsBag.Add(new QueryResponseObject
+                        {
+                            Id = current_result.Results[0].Id,
+                            Similarity = 1,
+                            Chunk = indexedChunks[current_result.Results[0].Index].Chunk,
+                            Index = current_result.Results[0].Index
                         });
                     }
                 }
