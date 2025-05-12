@@ -69,7 +69,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     K = Globals.K,
                     MinimumSimilarity = Globals.MinThresh,
                     HeadRouteID = "",
-                    Index = j
+                    Index = req.Index
                 };
                 searchReq.Vector.AddRange(req.Vector);
                 outgoingBatch.Reqs.Add(searchReq);
