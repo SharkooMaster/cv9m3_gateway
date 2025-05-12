@@ -112,7 +112,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 {
                     if (result.SimilarityRate >= Globals.MinThresh)
                     {
-                        Console.WriteLine("found");
+                        Console.WriteLine($"found {result.SimilarityRate}");
                         resultsBag.Add(new QueryResponseObject
                         {
                             Id = result.Id,
