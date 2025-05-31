@@ -102,7 +102,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 {
                     Id = current_result.Results[0].Id,
                     Similarity = 1,
-                    Chunk = indexedChunks[current_result.Results[0].Index].Chunk,
+                    Chunk = indexedChunks[current_result.Results[0].I].Chunk,
                     Index = current_result.Results[0].Index,
                     I = current_result.Results[0].I
                 });
@@ -132,7 +132,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                         {
                             Id = current_result.Results[0].Id,
                             Similarity = 1,
-                            Chunk = indexedChunks[current_result.Results[0].Index].Chunk,
+                            Chunk = indexedChunks[current_result.Results[0].I].Chunk,
                             Index = current_result.Results[0].Index,
                             I = current_result.Results[0].I
                         });
