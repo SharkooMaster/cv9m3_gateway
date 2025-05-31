@@ -103,7 +103,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     Id = current_result.Results[0].Id,
                     Similarity = 1,
                     Chunk = indexedChunks[current_result.Results[0].Index].Chunk,
-                    Index = current_result.Results[0].Index
+                    Index = current_result.Results[0].Index,
+                    I = current_result.Results[0].I
                 });
             }
             else
@@ -118,7 +119,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             Id = result.Id,
                             Index = current_result.Results[0].Index,
                             Similarity = result.SimilarityRate,
-                            Chunk = result.Chunk
+                            Chunk = result.Chunk,
+                            I = current_result.Results[0].I
                         });
                     }
                     else
@@ -131,7 +133,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             Id = current_result.Results[0].Id,
                             Similarity = 1,
                             Chunk = indexedChunks[current_result.Results[0].Index].Chunk,
-                            Index = current_result.Results[0].Index
+                            Index = current_result.Results[0].Index,
+                            I = current_result.Results[0].I
                         });
                     }
                 }
