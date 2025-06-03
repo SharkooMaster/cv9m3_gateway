@@ -12,23 +12,24 @@ message SearchVector_Reqs
 
 message SearchVector_Req
 {
-    uint64 key = 1;
-    string bitstring = 2;
+    uint64 index = 1;
+
+    repeated string bitstrings = 2;
     repeated float vector = 3;
 
     float minimum_similarity = 4;
     int32 k = 5;
-    string headRouteID = 6;
-    int32 index = 7;
 }
 
 message SearchVectorObject
 {
-    float similarity_rate = 1;
+    uint64 bucket_id = 1;
+    int64 bucket_key = 2;
+
+    float similarity = 3;
     bytes chunk = 2;
-    uint64 id = 3;
+
     int32 index = 4;
-    int32 i = 5;
 }
 
 message SearchVector_Results

@@ -17,6 +17,12 @@ using Newtonsoft.Json.Linq;
 
 namespace Gateway.Services.Grpc;
 
+public class Query
+{
+  public QueryObject query { get; set; }
+  public List<string> buckets { get; set; }
+}
+
 public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 {
     private async Task initCLMS(string _name, string _id, string headID)
@@ -51,108 +57,13 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
         QueryResponse response = new QueryResponse();
+
+        // Create a class that can hold a query and its neighbours
+        // Batch that class in groups of N
+        // Save the results that needs saving
+        // Filter for best results per query class per response
+        // Responed properly
         
-        SearchVector_Reqs outgoingBatch = new SearchVector_Reqs();
-        Dictionary<int, QueryObject> indexedChunks = new Dictionary<int, QueryObject>();
-
-        for (int j = 0; j < request.QueryObjects.Count; j++)
-        {
-            QueryObject req = request.QueryObjects[j];
-            indexedChunks.Add(req.Index, req);
-            List<string> neighbouringBuckets = GetNeighbouringBuckets(req.BucketString);
-
-            for (int i = 0; i < neighbouringBuckets.Count; i++)
-            {
-                SearchVector_Req searchReq = new SearchVector_Req
-                {
-                    Bitstring = neighbouringBuckets[i],
-                    K = Globals.K,
-                    MinimumSimilarity = Globals.MinThresh,
-                    HeadRouteID = "",
-                    Index = req.Index
-                };
-                searchReq.Vector.AddRange(req.Vector);
-                outgoingBatch.Reqs.Add(searchReq);
-            }
-        }
-        
-        Stopwatch sw = new Stopwatch();
-        sw.Start();
-
-        SearchVector_Results results = await Globals.svs.ClientGet(
-            outgoingBatch,
-            Globals.AgentsLoadbalancer,
-            "80",
-            context.CancellationToken
-        );
-        sw.Stop();
-        Console.WriteLine($"Time to search {sw.ElapsedMilliseconds}ms");
-
-        List<QueryResponseObject> resultsBag = new List<QueryResponseObject>();
-        List<SearchVector_Result> ToStore = new List<SearchVector_Result>();
-        for (int i = 0; i < results.Results.Count; i++)
-        {
-            SearchVector_Result current_result = results.Results[i];
-            if(current_result.Save)
-            {
-                Console.WriteLine("Saving 1");
-                ToStore.Add(current_result);
-
-                resultsBag.Add(new QueryResponseObject
-                {
-                    Id = current_result.Results[0].Id,
-                    Similarity = 1,
-                    Chunk = indexedChunks[current_result.Results[0].I].Chunk,
-                    Index = current_result.Results[0].Index,
-                    I = current_result.Results[0].I
-                });
-            }
-            else
-            {
-                foreach (var result in current_result.Results)
-                {
-                    if (result.SimilarityRate >= Globals.MinThresh)
-                    {
-                        Console.WriteLine($"found {result.SimilarityRate}");
-                        resultsBag.Add(new QueryResponseObject
-                        {
-                            Id = result.Id,
-                            Index = current_result.Results[0].Index,
-                            Similarity = result.SimilarityRate,
-                            Chunk = result.Chunk,
-                            I = current_result.Results[0].I
-                        });
-                    }
-                    else
-                    {
-                        Console.WriteLine("Saving 2");
-                        ToStore.Add(current_result);
-
-                        resultsBag.Add(new QueryResponseObject
-                        {
-                            Id = current_result.Results[0].Id,
-                            Similarity = 1,
-                            Chunk = indexedChunks[current_result.Results[0].I].Chunk,
-                            Index = current_result.Results[0].Index,
-                            I = current_result.Results[0].I
-                        });
-                    }
-                }
-            }
-        }
-        response.Results.AddRange(resultsBag);
-
-        // Store
-        for (int i = 0; i < ToStore.Count; i++)
-        {
-            byte[] _chunk = indexedChunks[ToStore[i].Results[0].I].Chunk.ToArray();
-            float[] _vec = indexedChunks[ToStore[i].Results[0].I].Vector.ToArray();
-
-            _ = NetworkFileStorageHandler.StoreVector("", new M_Data() {
-                chunk = _chunk,
-                vector = _vec
-            });
-        }
         return response;
     }
     
