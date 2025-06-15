@@ -8,7 +8,7 @@ namespace Gateway.Services.Grpc;
 
 public class SearchVectorService : SearchVector.SearchVectorClient
 {
-    public async Task<SearchVector_Results> ClientGet(SearchVector_Reqs req, string _ip, string _port = "5000", CancellationToken ct = default)
+    public async Task<SearchVector_Result> ClientGet(SearchVector_Req req, string _ip, string _port = "5000", CancellationToken ct = default)
     {
         try
         {

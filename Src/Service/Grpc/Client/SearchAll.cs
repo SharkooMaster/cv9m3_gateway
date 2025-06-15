@@ -58,8 +58,19 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     {
         QueryResponse response = new QueryResponse();
 
-        // Create a class that can hold a query and its neighbours
-        // Batch that class in groups of N
+        // Create a class that can hold a query and its neighbours  [x]
+        List<Query> queries = new List<Query>();
+        for(int i = 0; i < request.QueryObjects.Count(); i++)
+        {
+            var qObj = request.QueryObjects[i];
+            queries.Add(new Query(){
+                query = qObj,
+                buckets = GetNeighbouringBuckets(qObj.BucketString)
+            });
+        }
+        Console.WriteLine($"len: {queries.Count}");
+
+        // Search   []
         // Save the results that needs saving
         // Filter for best results per query class per response
         // Responed properly
