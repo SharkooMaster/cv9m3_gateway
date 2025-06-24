@@ -1,6 +1,7 @@
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Gateway.Modules;
@@ -14,6 +15,8 @@ using Grpc.Core;
 using Microsoft.AspNetCore.Server.HttpSys;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace Gateway.Services.Grpc;
 
@@ -42,28 +45,129 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         List<string> results = new(Globals.K + 1);
         char[] buffer = bitString.ToCharArray();
 
+        results.Add(bitString);
         for (int i = 0; i < Globals.K; i++)
         {
             char original = buffer[i];
             buffer[i] = (original == '0') ? '1' : '0';
             results.Add(new string(buffer));
-            buffer[i] = original; // restore original bit
+            buffer[i] = original;
         }
 
-        results.Add(bitString);
         return results;
+    }
+
+    public static unsafe (int[] result, int equalCount) SubtractAVX2(byte[] a, byte[] b)
+    {
+        if (!Avx2.IsSupported)
+            throw new PlatformNotSupportedException("AVX2 is not supported on this CPU.");
+        if (a.Length != b.Length)
+            throw new ArgumentException("Arrays must be the same length.");
+
+        int length = a.Length;
+        int[] result = new int[length];
+        int equalCount = 0;
+
+        fixed (byte* pa = a, pb = b)
+        fixed (int* pr = result)
+        {
+            int i = 0;
+            int vectorWidth = 32;
+
+            for (; i <= length - vectorWidth; i += vectorWidth)
+            {
+                // Load 32 bytes from each array
+                Vector256<byte> va = Avx.LoadVector256(pa + i);
+                Vector256<byte> vb = Avx.LoadVector256(pb + i);
+
+                // Compare for equality (a == b)
+                Vector256<byte> cmp = Avx2.CompareEqual(va, vb);
+
+                // Count number of matching bytes (cmp byte = 0xFF when equal)
+                uint mask = (uint)Avx2.MoveMask(cmp); // 32 bits
+                equalCount += CountSetBits(mask);
+
+                // Manual subtraction: split 128-bit lanes into ushort vectors
+                var va_low = Avx.ExtractVector128(va, 0);
+                var va_high = Avx.ExtractVector128(va, 1);
+                var vb_low = Avx.ExtractVector128(vb, 0);
+                var vb_high = Avx.ExtractVector128(vb, 1);
+
+                for (int j = 0; j < 16; j++)
+                {
+                    pr[i + j] = va_low.GetElement(j) - vb_low.GetElement(j);
+                    pr[i + 16 + j] = va_high.GetElement(j) - vb_high.GetElement(j);
+                }
+            }
+
+            // Remainder
+            for (; i < length; i++)
+            {
+                int diff = pa[i] - pb[i];
+                pr[i] = diff;
+                if (diff == 0)
+                    equalCount++;
+            }
+        }
+
+        return (result, equalCount);
+    }
+
+    // Efficient Hamming weight (population count)
+    private static int CountSetBits(uint value)
+    {
+        // .NET 5+ has BitOperations.PopCount, but we use a manual fallback
+        int count = 0;
+        while (value != 0)
+        {
+            count += (int)(value & 1);
+            value >>= 1;
+        }
+        return count;
+    }
+
+    private QueryResponseObject SelectBestResult(SearchVector_Result incoming, Query query)
+    {
+        QueryResponseObject ret = new QueryResponseObject();
+
+        int bestIndex = -1;
+        int bestIndexSim = 0;
+        int[]? bestIndexDeltas = null;
+        for (int i = 0; i < incoming.Results.Count; i++)
+        {
+            (int[], int) subRes = SubtractAVX2(query.query.Chunk.ToArray(), incoming.Results[i].Chunk.ToArray());
+            if (subRes.Item2 > bestIndexSim)
+            {
+                bestIndex = i;
+                bestIndexSim = subRes.Item2;
+                bestIndexDeltas = subRes.Item1;
+            }
+        }
+
+        if(bestIndex < 0){ throw new Exception("Error: bestIndex in SelectBestResult resulted in -1. Index our of range"); }
+
+        ret.BucketId = incoming.Results[bestIndex].BucketId;
+        ret.BucketKey = (ulong)incoming.Results[bestIndex].BucketKey;
+        ret.Chunk = incoming.Results[bestIndex].Chunk;
+        ret.Index = incoming.Results[bestIndex].Index;
+        ret.Similarity = bestIndexSim / incoming.Results[bestIndex].Chunk.Length;
+        ret.Duplicate = false;
+
+        return ret;
     }
 
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
         QueryResponse response = new QueryResponse();
+        ConcurrentBag<QueryResponseObject> responseObjects = new ConcurrentBag<QueryResponseObject>();
 
         // Create a class that can hold a query and its neighbours  [x]
         List<Query> queries = new List<Query>();
-        for(int i = 0; i < request.QueryObjects.Count(); i++)
+        for (int i = 0; i < request.QueryObjects.Count(); i++)
         {
             var qObj = request.QueryObjects[i];
-            queries.Add(new Query(){
+            queries.Add(new Query()
+            {
                 query = qObj,
                 buckets = GetNeighbouringBuckets(qObj.BucketString)
             });
@@ -71,10 +175,59 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         Console.WriteLine($"len: {queries.Count}");
 
         // Search   []
+        ConcurrentBag<(SearchVectorObject, int)> saveQueue = new ConcurrentBag<(SearchVectorObject, int)>();
+
+        ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = 10 };
+        await Parallel.ForAsync(0, queries.Count, options, async (i, ct) =>
+        {
+            SearchVector_Req req = new SearchVector_Req()
+            {
+                Index = queries[i].query.Index,
+                MinimumSimilarity = Globals.MinThresh,
+                K = Globals.K
+            };
+            req.Vector.AddRange(queries[i].query.Vector);
+            req.Bitstrings.AddRange(queries[i].buckets);
+            SearchVector_Result res = await Globals.svs.ClientGet(req, Globals.AgentsLoadbalancer);
+
+            if (res.Save)
+            {
+                SearchVectorObject svr = res.Results[0];
+                // Insert actual chunk into responseObject
+                svr.Chunk = request.QueryObjects[svr.Index].Chunk;
+                // Add to save queue
+                saveQueue.Add((svr, i));
+                // Insert to response
+                responseObjects.Add(new QueryResponseObject()
+                {
+                    BucketId = svr.BucketId,
+                    BucketKey = (ulong)svr.BucketKey,
+                    Similarity = svr.Similarity,
+                    Chunk = svr.Chunk,
+                    Index = svr.Index,
+                    Duplicate = true
+                });
+            }
+            else
+            {
+                // Filter for best results per query class per response
+                QueryResponseObject bestFit = SelectBestResult(res, queries[i]);
+                responseObjects.Add(bestFit);
+            }
+        });
+
         // Save the results that needs saving
-        // Filter for best results per query class per response
-        // Responed properly
-        
+        foreach ((SearchVectorObject,int) item in saveQueue)
+        {
+            await NetworkFileStorageHandler.StoreVector("", new M_Data()
+            {
+                vector = queries[item.Item2].query.Vector.ToArray(),
+                chunk = item.Item1.Chunk.ToArray()
+            });
+        }
+
+        // Respond properly
+        response.Results.AddRange(responseObjects);
         return response;
     }
     
