@@ -20,13 +20,37 @@ public class VectorInfo
 
 public class GcsSqlStorageService : INetworkFileStorageService
 {
-    private readonly StorageClient _storageClient;
+    private StorageClient? _storageClient;
     private readonly string _bucketName;
+    private readonly object _storageClientLock = new object();
 
     public GcsSqlStorageService(string bucketName)
     {
-        _storageClient = StorageClient.Create();
         _bucketName = bucketName;
+        // Don't initialize StorageClient here - initialize lazily when needed
+    }
+
+    private StorageClient? GetStorageClient()
+    {
+        if (_storageClient != null)
+            return _storageClient;
+
+        lock (_storageClientLock)
+        {
+            if (_storageClient != null)
+                return _storageClient;
+
+            try
+            {
+                _storageClient = StorageClient.Create();
+                return _storageClient;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Warning] Failed to initialize GCS client: {ex.Message}. GCS operations will be disabled.");
+                return null;
+            }
+        }
     }
 
     public async Task StoreVector(string bucket_Id, M_Data data)
@@ -54,12 +78,19 @@ public class GcsSqlStorageService : INetworkFileStorageService
 
     public async Task<bool> StoreChunkAsync(float[] hash, byte[] data, string bucketID)
     {
+        var client = GetStorageClient();
+        if (client == null)
+        {
+            Console.WriteLine("[Warning] GCS client not available, skipping chunk storage");
+            return false;
+        }
+
         try
         {
             string objectName = $"chunks/{GenerateChunkKey(hash)}";
 
             // Check if chunk already exists in GCS
-            var existingObjects = _storageClient.ListObjects(_bucketName, objectName);
+            var existingObjects = client.ListObjects(_bucketName, objectName);
             foreach (var obj in existingObjects)
             {
                 if (obj.Name == objectName)
@@ -71,7 +102,7 @@ public class GcsSqlStorageService : INetworkFileStorageService
 
             // Upload chunk
             using var memoryStream = new MemoryStream(data);
-            await _storageClient.UploadObjectAsync(_bucketName, objectName, null, memoryStream);
+            await client.UploadObjectAsync(_bucketName, objectName, null, memoryStream);
             // Console.WriteLine($"Uploaded chunk {hash} to GCS.");
             return true;
         }

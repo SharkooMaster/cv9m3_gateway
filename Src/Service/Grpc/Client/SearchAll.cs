@@ -216,19 +216,135 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             }
         });
 
-        // Save the results that needs saving
+        // Save the results that needs saving - call Agent to store chunks
         foreach ((SearchVectorObject,int) item in saveQueue)
         {
-            await NetworkFileStorageHandler.StoreVector("", new M_Data()
+            try
             {
-                vector = queries[item.Item2].query.Vector.ToArray(),
-                chunk = item.Item1.Chunk.ToArray()
-            });
+                StoreVector_Req storeReq = new StoreVector_Req
+                {
+                    TargetIp = Globals.AgentsLoadbalancer, // Use loadbalancer to route to agent
+                    Bitstring = queries[item.Item2].query.BucketString,
+                    HeadRouteID = ""
+                };
+                storeReq.Vector.AddRange(queries[item.Item2].query.Vector);
+                storeReq.Chunk = item.Item1.Chunk;
+                
+                var storeRes = Globals.svec.Store(storeReq);
+                Console.WriteLine($"[SearchAll] Stored chunk via Agent, id: {storeRes.Id}");
+            }
+            catch (Exception storeEx)
+            {
+                Console.WriteLine($"[SearchAll] Failed to store chunk via Agent: {storeEx.Message}");
+                // Continue anyway - chunk metadata might already be stored
+            }
         }
 
         // Respond properly
         response.Results.AddRange(responseObjects);
         return response;
+    }
+
+    public override async Task SearchAllStream(
+        IAsyncStreamReader<QueryObject> requestStream,
+        IServerStreamWriter<QueryResponseObject> responseStream,
+        ServerCallContext context)
+    {
+        try
+        {
+            await foreach (var queryObj in requestStream.ReadAllAsync(context.CancellationToken))
+            {
+                try
+                {
+                    // Get neighboring buckets for this query
+                    List<string> buckets = GetNeighbouringBuckets(queryObj.BucketString);
+                    
+                    // Create search request
+                    SearchVector_Req req = new SearchVector_Req()
+                    {
+                        Index = queryObj.Index,
+                        MinimumSimilarity = Globals.MinThresh,
+                        K = Globals.K
+                    };
+                    req.Vector.AddRange(queryObj.Vector);
+                    req.Bitstrings.AddRange(buckets);
+                    
+                    // Search in agent
+                    SearchVector_Result res = await Globals.svs.ClientGet(req, Globals.AgentsLoadbalancer, "5000", context.CancellationToken);
+                    
+                    QueryResponseObject responseObj;
+                    
+                    if (res.Save)
+                    {
+                        // New chunk needs to be saved - call Agent to store it
+                        SearchVectorObject svr = res.Results[0];
+                        svr.Chunk = queryObj.Chunk; // Use original chunk
+                        
+                        // Store via Agent's StoreVector service (Agent will store locally)
+                        StoreVector_Req storeReq = new StoreVector_Req
+                        {
+                            TargetIp = Globals.AgentsLoadbalancer, // Use loadbalancer to route to agent
+                            Bitstring = queryObj.BucketString,
+                            HeadRouteID = ""
+                        };
+                        storeReq.Vector.AddRange(queryObj.Vector);
+                        storeReq.Chunk = queryObj.Chunk;
+                        
+                        try
+                        {
+                            Console.WriteLine($"[SearchAllStream] Preparing to store chunk - Bitstring: {queryObj.BucketString}, Chunk size: {queryObj.Chunk?.Length ?? 0}, Vector size: {queryObj.Vector?.Count ?? 0}");
+                            var callOptions = new CallOptions(cancellationToken: context.CancellationToken);
+                            var storeRes = Globals.svec.Store(storeReq, callOptions);
+                            Console.WriteLine($"[SearchAllStream] ✅ SUCCESS: Stored chunk via Agent at {Globals.AgentsLoadbalancer}, id: {storeRes.Id}, index: {storeRes.Index}");
+                        }
+                        catch (Exception storeEx)
+                        {
+                            Console.WriteLine($"[SearchAllStream] ❌ ERROR: Failed to store chunk via Agent: {storeEx.Message}");
+                            Console.WriteLine($"[SearchAllStream] ❌ Stack trace: {storeEx.StackTrace}");
+                            // Continue anyway - chunk metadata might already be stored
+                        }
+                        
+                        responseObj = new QueryResponseObject()
+                        {
+                            BucketId = svr.BucketId,
+                            BucketKey = (ulong)svr.BucketKey,
+                            Similarity = svr.Similarity,
+                            Chunk = svr.Chunk,
+                            Index = svr.Index,
+                            Duplicate = true
+                        };
+                    }
+                    else
+                    {
+                        // Find best matching result
+                        Query query = new Query()
+                        {
+                            query = queryObj,
+                            buckets = buckets
+                        };
+                        responseObj = SelectBestResult(res, query);
+                    }
+                    
+                    // Stream result back immediately
+                    await responseStream.WriteAsync(responseObj);
+                }
+                catch (Exception ex)
+                {
+                    // Log error but continue processing other queries
+                    Console.WriteLine($"[SearchAllStream] Error processing query {queryObj.Index}: {ex.Message}");
+                    // Optionally send error response or skip this query
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Client cancelled - this is normal, just exit
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SearchAllStream] Fatal error: {ex.Message}");
+            throw;
+        }
     }
     
 /*     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
