@@ -4,11 +4,13 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Threading.Channels;
 using Gateway.Modules;
 using Gateway.Modules.Agneta;
 using Gateway.Modules.Pushover;
 using Gateway.Utils.Globals;
 using Gateway.Utils.Misc;
+using Gateway.Utils;
 using GatewayService;
 using Google.Protobuf;
 using Grpc.Core;
@@ -40,18 +42,69 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         });
     }
 
+    // OPTIMIZATION: Overload without vector (backward compatible)
     private List<string> GetNeighbouringBuckets(string bitString)
     {
-        List<string> results = new(Globals.K + 1);
+        return GetNeighbouringBuckets(bitString, null);
+    }
+    
+    // OPTIMIZATION: Confidence-based bucket ordering for faster early termination
+    // Bits with low confidence (low |sum|) are most likely to change, so flip those first
+    private List<string> GetNeighbouringBuckets(string bitString, Google.Protobuf.Collections.RepeatedField<float>? lshVector = null)
+    {
+        // K=1 means radius-1: flip every bit position (all single-bit neighbors)
+        // Otherwise, flip the first K bits (legacy behavior)
+        var results = new List<string>();
         char[] buffer = bitString.ToCharArray();
 
+        // Always include the original bucket first (most likely to have matches)
         results.Add(bitString);
-        for (int i = 0; i < Globals.K; i++)
+
+        // OPTIMIZATION: If we have LSH vector, sort bits by confidence for optimal search order
+        if (lshVector != null && lshVector.Count == bitString.Length && Globals.K <= 1)
         {
-            char original = buffer[i];
-            buffer[i] = (original == '0') ? '1' : '0';
-            results.Add(new string(buffer));
-            buffer[i] = original;
+            // Sort bits by confidence (lowest |sum| = most uncertain = flip first)
+            // This helps early termination find matches faster
+            var bitConfidences = new List<(int bitIndex, float confidence)>();
+            for (int i = 0; i < bitString.Length; i++)
+            {
+                float confidence = Math.Abs(lshVector[i]);
+                bitConfidences.Add((i, confidence));
+            }
+            
+            // Sort by confidence (lowest first - these are most likely to change)
+            bitConfidences.Sort((a, b) => a.confidence.CompareTo(b.confidence));
+            
+            // Still search ALL 64 neighbors, but in optimal order
+            foreach (var (bitIndex, _) in bitConfidences)
+            {
+                char original = buffer[bitIndex];
+                buffer[bitIndex] = (original == '0') ? '1' : '0';
+                results.Add(new string(buffer));
+                buffer[bitIndex] = original; // Flip back
+            }
+        }
+        else if (Globals.K <= 1)
+        {
+            // Fallback: original sequential order if no vector provided
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                char original = buffer[i];
+                buffer[i] = (original == '0') ? '1' : '0';
+                results.Add(new string(buffer));
+                buffer[i] = original;
+            }
+        }
+        else
+        {
+            int flips = Math.Min(Globals.K, buffer.Length);
+            for (int i = 0; i < flips; i++)
+            {
+                char original = buffer[i];
+                buffer[i] = (original == '0') ? '1' : '0';
+                results.Add(new string(buffer));
+                buffer[i] = original;
+            }
         }
 
         return results;
@@ -130,6 +183,19 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     {
         QueryResponseObject ret = new QueryResponseObject();
 
+        // FIXED: Handle case where no results found
+        if (incoming.Results == null || incoming.Results.Count == 0)
+        {
+            // No results found - return default response indicating chunk needs to be stored
+            ret.BucketId = 0;
+            ret.BucketKey = 0;
+            ret.Chunk = query.query.Chunk;
+            ret.Index = query.query.Index;
+            ret.Similarity = 0.0f;
+            ret.Duplicate = false; // Not a duplicate, needs to be stored
+            return ret;
+        }
+
         int bestIndex = -1;
         int bestIndexSim = 0;
         int[]? bestIndexDeltas = null;
@@ -150,8 +216,14 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         ret.BucketKey = (ulong)incoming.Results[bestIndex].BucketKey;
         ret.Chunk = incoming.Results[bestIndex].Chunk;
         ret.Index = incoming.Results[bestIndex].Index;
-        ret.Similarity = bestIndexSim / incoming.Results[bestIndex].Chunk.Length;
-        ret.Duplicate = false;
+        
+        // Calculate byte-level similarity (how many bytes match)
+        float byteSimilarity = (float)bestIndexSim / incoming.Results[bestIndex].Chunk.Length;
+        ret.Similarity = byteSimilarity;
+        
+        // We use Duplicate as a reporting flag: true means "we found an existing base reference worth using"
+        // (i.e., match >= MinThresh). false means "no match, chunk had to be stored".
+        ret.Duplicate = byteSimilarity >= Globals.MinThresh;
 
         return ret;
     }
@@ -169,7 +241,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             queries.Add(new Query()
             {
                 query = qObj,
-                buckets = GetNeighbouringBuckets(qObj.BucketString)
+                buckets = GetNeighbouringBuckets(qObj.BucketString, qObj.Vector)
             });
         }
         Console.WriteLine($"len: {queries.Count}");
@@ -180,6 +252,23 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = 10 };
         await Parallel.ForAsync(0, queries.Count, options, async (i, ct) =>
         {
+            // LOCAL MODE: Skip DHT routing, go directly to agent-1
+            // DISTRIBUTED MODE: Use DHT to find responsible agent
+            string targetAgent;
+            if (LocalModeDetector.IsLocalMode())
+            {
+                targetAgent = Globals.AgentsLoadbalancer; // Direct to agent-1
+            }
+            else
+            {
+                // DHT-AWARE ROUTING: Find the agent responsible for the primary bucket
+                targetAgent = await Globals.dhtService.FindResponsibleAgentAsync(
+                    queries[i].query.BucketString, 
+                    Globals.AgentsLoadbalancer, 
+                    ct
+                );
+            }
+            
             SearchVector_Req req = new SearchVector_Req()
             {
                 Index = queries[i].query.Index,
@@ -188,7 +277,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             };
             req.Vector.AddRange(queries[i].query.Vector);
             req.Bitstrings.AddRange(queries[i].buckets);
-            SearchVector_Result res = await Globals.svs.ClientGet(req, Globals.AgentsLoadbalancer);
+            SearchVector_Result res = await Globals.svs.ClientGet(req, targetAgent);
 
             if (res.Save)
             {
@@ -221,9 +310,25 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         {
             try
             {
+                // LOCAL MODE: Skip DHT routing, go directly to agent-1
+                // DISTRIBUTED MODE: Use DHT to find responsible agent
+                string targetAgent;
+                if (LocalModeDetector.IsLocalMode())
+                {
+                    targetAgent = Globals.AgentsLoadbalancer; // Direct to agent-1
+                }
+                else
+                {
+                    // Find the DHT-determined agent for this bucket
+                    targetAgent = await Globals.dhtService.FindResponsibleAgentAsync(
+                        queries[item.Item2].query.BucketString, 
+                        Globals.AgentsLoadbalancer
+                    );
+                }
+                
                 StoreVector_Req storeReq = new StoreVector_Req
                 {
-                    TargetIp = Globals.AgentsLoadbalancer, // Use loadbalancer to route to agent
+                    TargetIp = targetAgent, // Use DHT-determined agent for storage
                     Bitstring = queries[item.Item2].query.BucketString,
                     HeadRouteID = ""
                 };
@@ -252,89 +357,301 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     {
         try
         {
-            await foreach (var queryObj in requestStream.ReadAllAsync(context.CancellationToken))
+            // OPTIMIZATION: Process queries in parallel instead of sequentially
+            // This is the critical fix - allows multiple queries to be processed concurrently
+            
+            // Create channel to buffer queries and results
+            var queryChannel = Channel.CreateUnbounded<QueryObject>();
+            var resultChannel = Channel.CreateUnbounded<(QueryResponseObject? result, int index)>();
+            
+            // Background task to read queries from stream
+            var readTask = Task.Run(async () =>
             {
                 try
                 {
-                    // Get neighboring buckets for this query
-                    List<string> buckets = GetNeighbouringBuckets(queryObj.BucketString);
-                    
-                    // Create search request
-                    SearchVector_Req req = new SearchVector_Req()
+                    await foreach (var queryObj in requestStream.ReadAllAsync(context.CancellationToken))
                     {
-                        Index = queryObj.Index,
-                        MinimumSimilarity = Globals.MinThresh,
-                        K = Globals.K
-                    };
-                    req.Vector.AddRange(queryObj.Vector);
-                    req.Bitstrings.AddRange(buckets);
-                    
-                    // Search in agent
-                    SearchVector_Result res = await Globals.svs.ClientGet(req, Globals.AgentsLoadbalancer, "5000", context.CancellationToken);
-                    
-                    QueryResponseObject responseObj;
-                    
-                    if (res.Save)
-                    {
-                        // New chunk needs to be saved - call Agent to store it
-                        SearchVectorObject svr = res.Results[0];
-                        svr.Chunk = queryObj.Chunk; // Use original chunk
-                        
-                        // Store via Agent's StoreVector service (Agent will store locally)
-                        StoreVector_Req storeReq = new StoreVector_Req
-                        {
-                            TargetIp = Globals.AgentsLoadbalancer, // Use loadbalancer to route to agent
-                            Bitstring = queryObj.BucketString,
-                            HeadRouteID = ""
-                        };
-                        storeReq.Vector.AddRange(queryObj.Vector);
-                        storeReq.Chunk = queryObj.Chunk;
-                        
-                        try
-                        {
-                            Console.WriteLine($"[SearchAllStream] Preparing to store chunk - Bitstring: {queryObj.BucketString}, Chunk size: {queryObj.Chunk?.Length ?? 0}, Vector size: {queryObj.Vector?.Count ?? 0}");
-                            var callOptions = new CallOptions(cancellationToken: context.CancellationToken);
-                            var storeRes = Globals.svec.Store(storeReq, callOptions);
-                            Console.WriteLine($"[SearchAllStream] ✅ SUCCESS: Stored chunk via Agent at {Globals.AgentsLoadbalancer}, id: {storeRes.Id}, index: {storeRes.Index}");
-                        }
-                        catch (Exception storeEx)
-                        {
-                            Console.WriteLine($"[SearchAllStream] ❌ ERROR: Failed to store chunk via Agent: {storeEx.Message}");
-                            Console.WriteLine($"[SearchAllStream] ❌ Stack trace: {storeEx.StackTrace}");
-                            // Continue anyway - chunk metadata might already be stored
-                        }
-                        
-                        responseObj = new QueryResponseObject()
-                        {
-                            BucketId = svr.BucketId,
-                            BucketKey = (ulong)svr.BucketKey,
-                            Similarity = svr.Similarity,
-                            Chunk = svr.Chunk,
-                            Index = svr.Index,
-                            Duplicate = true
-                        };
+                        await queryChannel.Writer.WriteAsync(queryObj, context.CancellationToken);
                     }
-                    else
-                    {
-                        // Find best matching result
-                        Query query = new Query()
-                        {
-                            query = queryObj,
-                            buckets = buckets
-                        };
-                        responseObj = SelectBestResult(res, query);
-                    }
-                    
-                    // Stream result back immediately
-                    await responseStream.WriteAsync(responseObj);
+                    queryChannel.Writer.Complete();
                 }
                 catch (Exception ex)
                 {
-                    // Log error but continue processing other queries
-                    Console.WriteLine($"[SearchAllStream] Error processing query {queryObj.Index}: {ex.Message}");
-                    // Optionally send error response or skip this query
+                    queryChannel.Writer.Complete(ex);
+                }
+            }, context.CancellationToken);
+            
+            // Process queries in parallel with concurrency limit
+            // SAFETY: Use 75% of CPU cores max, but cap at reasonable limit for I/O-bound work
+            // For 8 cores: 6 concurrent queries (75%), but allow up to 20 for I/O-bound operations
+            // DYNAMIC: Adjust concurrency based on current CPU and memory usage
+            int baseConcurrency = (int)(Environment.ProcessorCount * 0.75);
+            var maxConcurrency = DynamicResourceManager.GetOptimalConcurrency(
+                minConcurrency: 4,
+                maxConcurrency: baseConcurrency,
+                baseConcurrency: baseConcurrency
+            );
+            var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+            var activeTasks = new List<Task>();
+            
+            // Start background task to process queries and stream results
+            var processTask = Task.Run(async () =>
+            {
+                try
+                {
+                    // Process queries as they arrive
+                    await foreach (var queryObj in queryChannel.Reader.ReadAllAsync(context.CancellationToken))
+                    {
+                        // Wait for semaphore slot
+                        await semaphore.WaitAsync(context.CancellationToken);
+                        
+                        // Process query in parallel
+                        var task = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                // Get neighboring buckets for this query (with optimal ordering based on LSH vector confidence)
+                                List<string> buckets = GetNeighbouringBuckets(queryObj.BucketString, queryObj.Vector);
+                                
+                                // LOCAL MODE: Skip DHT routing, go directly to agent-1
+                                // DISTRIBUTED MODE: Use DHT to find responsible agent
+                                string targetAgent;
+                                if (LocalModeDetector.IsLocalMode())
+                                {
+                                    targetAgent = Globals.AgentsLoadbalancer; // Direct to agent-1
+                                }
+                                else
+                                {
+                                    // DHT-AWARE ROUTING: Find the agent responsible for the primary bucket
+                                    // This distributes load across all agents instead of bottlenecking on agent-1
+                                    targetAgent = await Globals.dhtService.FindResponsibleAgentAsync(
+                                        queryObj.BucketString, 
+                                        Globals.AgentsLoadbalancer, 
+                                        context.CancellationToken
+                                    );
+                                    Console.WriteLine($"[SearchAllStream] DHT routing: bucket {queryObj.BucketString} -> agent {targetAgent}");
+                                }
+                                
+                                // Create search request
+                                SearchVector_Req req = new SearchVector_Req()
+                                {
+                                    Index = queryObj.Index,
+                                    MinimumSimilarity = Globals.MinThresh,
+                                    K = Globals.K
+                                };
+                                req.Vector.AddRange(queryObj.Vector);
+                                req.Bitstrings.AddRange(buckets);
+                                
+                                // Search in the DHT-determined agent (distributes load across all agents)
+                                Console.WriteLine($"[SearchAllStream] Searching for query {queryObj.Index} in agent {targetAgent}");
+                                SearchVector_Result res = await Globals.svs.ClientGet(req, targetAgent, "5000", context.CancellationToken);
+                                Console.WriteLine($"[SearchAllStream] Search result for query {queryObj.Index}: Save={res.Save}, Results.Count={res.Results.Count}");
+                                
+                                QueryResponseObject responseObj;
+                                
+                                if (res.Save)
+                                {
+                                    // New chunk needs to be saved - call Agent to store it
+                                    SearchVectorObject svr = res.Results[0];
+                                    svr.Chunk = queryObj.Chunk; // Use original chunk
+                                    
+                                    // Store via Agent's StoreVector service (Agent will store locally)
+                                    // Use the same DHT-determined agent for storage consistency
+                                    StoreVector_Req storeReq = new StoreVector_Req
+                                    {
+                                        TargetIp = targetAgent, // Use DHT-determined agent for storage
+                                        Bitstring = queryObj.BucketString,
+                                        HeadRouteID = ""
+                                    };
+                                    storeReq.Vector.AddRange(queryObj.Vector);
+                                    storeReq.Chunk = queryObj.Chunk;
+                                    
+                                    // Wait for chunk storage to complete - ensures chunks are actually stored
+                                    try
+                                    {
+                                        var callOptions = new CallOptions(
+                                            deadline: DateTime.UtcNow.AddSeconds(10), // 10s deadline for storage
+                                            cancellationToken: context.CancellationToken
+                                        );
+                                        var storeRes = Globals.svec.Store(storeReq, callOptions);
+                                        Console.WriteLine($"[SearchAllStream] ✅ Stored chunk for query {queryObj.Index}: id={storeRes.Id}, index={storeRes.Index}, chunk size={queryObj.Chunk.Length} bytes");
+
+                                        // IMPORTANT: When no similar chunk exists, the stored chunk becomes the base.
+                                        // Base == original => error encoding is empty.
+                                        responseObj = new QueryResponseObject()
+                                        {
+                                            BucketId = storeRes.Id,
+                                            BucketKey = storeRes.Index,
+                                            Similarity = 1.0f,
+                                            Chunk = queryObj.Chunk, // base chunk == original
+                                            Index = queryObj.Index,
+                                            Duplicate = false
+                                        };
+                                    }
+                                    catch (Exception storeEx)
+                                    {
+                                        Console.WriteLine($"[SearchAllStream] ❌ ERROR: Chunk storage failed for query {queryObj.Index}: {storeEx.Message}");
+                                        // Continue - compression can proceed, but chunk won't be stored
+                                        responseObj = new QueryResponseObject()
+                                        {
+                                            BucketId = 0,
+                                            BucketKey = 0,
+                                            Similarity = 1.0f,
+                                            Chunk = queryObj.Chunk, // fallback base
+                                            Index = queryObj.Index,
+                                            Duplicate = false
+                                        };
+                                    }
+                                }
+                                else
+                                {
+                                    // Find best matching result
+                                    Query query = new Query()
+                                    {
+                                        query = queryObj,
+                                        buckets = buckets
+                                    };
+                                    responseObj = SelectBestResult(res, query);
+                                    
+                                    // Only store if similarity < MinThresh (no good match found across all searched buckets)
+                                    if (responseObj.Similarity < Globals.MinThresh)
+                                    {
+                                        // No similar chunk found - store this chunk for future reuse.
+                                        // IMPORTANT: The newly stored chunk becomes the base for compression (base == original).
+                                        StoreVector_Req storeReq = new StoreVector_Req
+                                        {
+                                            TargetIp = targetAgent,
+                                            Bitstring = queryObj.BucketString,
+                                            HeadRouteID = ""
+                                        };
+                                        storeReq.Vector.AddRange(queryObj.Vector);
+                                        storeReq.Chunk = queryObj.Chunk;
+                                        
+                                        try
+                                        {
+                                            var callOptions = new CallOptions(
+                                                deadline: DateTime.UtcNow.AddSeconds(10),
+                                                cancellationToken: context.CancellationToken
+                                            );
+                                            var storeRes = Globals.svec.Store(storeReq, callOptions);
+                                            Console.WriteLine($"[SearchAllStream] ✅ Stored new chunk (similarity={responseObj.Similarity:F3} < {Globals.MinThresh}) for query {queryObj.Index}: id={storeRes.Id}, index={storeRes.Index}");
+
+                                            // Replace response with reference to the newly stored chunk as base (prevents huge patches)
+                                            responseObj.BucketId = storeRes.Id;
+                                            responseObj.BucketKey = storeRes.Index;
+                                            responseObj.Chunk = queryObj.Chunk; // base chunk == original
+                                            responseObj.Similarity = 1.0f;
+                                        }
+                                        catch (Exception storeEx)
+                                        {
+                                            Console.WriteLine($"[SearchAllStream] ❌ ERROR: Failed to store new chunk for query {queryObj.Index}: {storeEx.Message}");
+                                            // Fallback: still use self as base to avoid expansion
+                                            responseObj.BucketId = 0;
+                                            responseObj.BucketKey = 0;
+                                            responseObj.Chunk = queryObj.Chunk;
+                                            responseObj.Similarity = 1.0f;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Similarity >= MinThresh, found near-duplicate - use it for deduplication, DON'T store new chunk
+                                        Console.WriteLine($"[SearchAllStream] Using similar chunk (similarity={responseObj.Similarity:F3} >= {Globals.MinThresh}) for query {queryObj.Index}, NOT storing new chunk");
+                                    }
+                                }
+
+                                // Write result to channel (stream as ready)
+                                await resultChannel.Writer.WriteAsync((responseObj, queryObj.Index), context.CancellationToken);
+                            }
+                            catch (Exception ex)
+                            {
+                                // Log error but continue processing other queries
+                                Console.WriteLine($"[SearchAllStream] Error processing query {queryObj.Index}: {ex.Message}");
+                                Console.WriteLine($"[SearchAllStream] Stack trace: {ex.StackTrace}");
+                                
+                                // When search fails, we need to store the chunk anyway
+                                // Try to store it using DHT routing (or direct in local mode)
+                                try
+                                {
+                                    string targetAgent;
+                                    if (LocalModeDetector.IsLocalMode())
+                                    {
+                                        targetAgent = Globals.AgentsLoadbalancer; // Direct to agent-1
+                                    }
+                                    else
+                                    {
+                                        targetAgent = await Globals.dhtService.FindResponsibleAgentAsync(
+                                            queryObj.BucketString, 
+                                            Globals.AgentsLoadbalancer, 
+                                            context.CancellationToken
+                                        );
+                                    }
+                                    
+                                    StoreVector_Req storeReq = new StoreVector_Req
+                                    {
+                                        TargetIp = targetAgent,
+                                        Bitstring = queryObj.BucketString,
+                                        HeadRouteID = ""
+                                    };
+                                    storeReq.Vector.AddRange(queryObj.Vector);
+                                    storeReq.Chunk = queryObj.Chunk;
+                                    
+                                    var callOptions = new CallOptions(
+                                        deadline: DateTime.UtcNow.AddSeconds(10),
+                                        cancellationToken: context.CancellationToken
+                                    );
+                                    var storeRes = Globals.svec.Store(storeReq, callOptions);
+                                    Console.WriteLine($"[SearchAllStream] ✅ Stored chunk after error for query {queryObj.Index}: id={storeRes.Id}");
+                                }
+                                catch (Exception storeEx)
+                                {
+                                    Console.WriteLine($"[SearchAllStream] ❌ Failed to store chunk after error for query {queryObj.Index}: {storeEx.Message}");
+                                }
+                                
+                                // Create a default response object so compression can continue
+                                // Mark as needing save since we couldn't find a match
+                                var errorResponseObj = new QueryResponseObject()
+                                {
+                                    BucketId = 0,
+                                    BucketKey = 0,
+                                    Similarity = 0,
+                                    Chunk = queryObj.Chunk, // Use original chunk
+                                    Index = queryObj.Index,
+                                    Duplicate = false // Not a duplicate, needs encoding
+                                };
+                                await resultChannel.Writer.WriteAsync((errorResponseObj, queryObj.Index), context.CancellationToken);
+                            }
+                            finally
+                            {
+                                semaphore.Release();
+                            }
+                        }, context.CancellationToken);
+                        
+                        activeTasks.Add(task);
+                    }
+                    
+                    // Wait for all processing tasks to complete
+                    await Task.WhenAll(activeTasks);
+                    
+                    // Close result channel writer
+                    resultChannel.Writer.Complete();
+                }
+                catch (Exception ex)
+                {
+                    resultChannel.Writer.Complete(ex);
+                }
+            }, context.CancellationToken);
+            
+            // Stream results as they complete (order doesn't matter - Cross collects by index)
+            await foreach (var (result, index) in resultChannel.Reader.ReadAllAsync(context.CancellationToken))
+            {
+                if (result != null)
+                {
+                    await responseStream.WriteAsync(result);
                 }
             }
+            
+            // Wait for all tasks to complete
+            await Task.WhenAll(readTask, processTask);
         }
         catch (OperationCanceledException)
         {
@@ -359,7 +676,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
             // get neighbour buckets
             QueryObject req = request.QueryObjects[0];
-            List<string> neighbouringBuckets = GetNeighbouringBuckets(req.BucketString);
+            List<string> neighbouringBuckets = GetNeighbouringBuckets(req.BucketString, req.Vector);
             ConcurrentBag<SearchVectorObject> searchResults = new ConcurrentBag<SearchVectorObject>();
             string targetIP = Globals.AgentsLoadbalancer;
 

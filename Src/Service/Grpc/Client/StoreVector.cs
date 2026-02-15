@@ -19,7 +19,7 @@ public class StoreVectorService : StoreVector.StoreVectorClient
                 roundRobin: false
             );
 
-            var deadline = DateTime.UtcNow.AddSeconds(5);
+            var deadline = DateTime.UtcNow.AddSeconds(10); // Increased to 10s for storage operations
             return _client.Store(request, deadline: deadline);
         }
         catch(RpcException ex)

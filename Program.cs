@@ -18,6 +18,7 @@ using Gateway.Utils.Globals;
 using Gateway.Modules;
 using Gateway.Services.Clms;
 using Gateway.Services.Storage;
+using Gateway.Utils;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -87,6 +88,25 @@ app.MapGet("/", () =>
 });
 
 PushoverHandler.PushNotification($"Gateway:{Globals.GATEWAY_ID}: Running");
+
+// PRE-WARM CONNECTIONS: Establish gRPC channels to agents at startup
+// This eliminates connection setup latency for first requests
+if (LocalModeDetector.IsLocalMode())
+{
+    Console.WriteLine("[Gateway] Pre-warming gRPC connections in local mode...");
+    try
+    {
+        // Pre-warm connection to agent-1
+        // Just getting the channel is enough to establish the connection
+        var channel = GrpcChannelFactory.GetChannel(Globals.AgentsLoadbalancer, 5000);
+        Console.WriteLine("[Gateway] Pre-warmed connection to agent-1");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Gateway] Warning: Failed to pre-warm connection: {ex.Message}");
+    }
+}
+
 app.Run();
 
 await AgnetaHandler.Close();

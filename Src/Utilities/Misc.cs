@@ -66,14 +66,26 @@ public static class Misc
         }
 
         string[] hexValues = hexString.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-        byte[] bytes = new byte[hexValues.Length];
-
-        for (int i = 0; i < hexValues.Length; i++)
+        
+        // MEMORY POOLING: Use ArrayPool for temporary buffer
+        var pool = System.Buffers.ArrayPool<byte>.Shared;
+        byte[] tempBytes = pool.Rent(hexValues.Length);
+        try
         {
-            bytes[i] = Convert.ToByte(hexValues[i].Trim(), 16);
+            for (int i = 0; i < hexValues.Length; i++)
+            {
+                tempBytes[i] = Convert.ToByte(hexValues[i].Trim(), 16);
+            }
+            
+            // Copy to owned array for return
+            byte[] bytes = new byte[hexValues.Length];
+            Buffer.BlockCopy(tempBytes, 0, bytes, 0, hexValues.Length);
+            return bytes;
         }
-
-        return bytes;
+        finally
+        {
+            pool.Return(tempBytes);
+        }
     }
 
         public static double GetMemoryUsagePercentage()
