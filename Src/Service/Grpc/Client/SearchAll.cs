@@ -30,6 +30,18 @@ public class Query
 
 public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 {
+    private static int GetStreamMaxConcurrency()
+    {
+        var raw = Environment.GetEnvironmentVariable("GATEWAY_STREAM_CONCURRENCY");
+        if (int.TryParse(raw, out var configured) && configured > 0)
+        {
+            return configured;
+        }
+
+        // Conservative default for cluster stability; avoids overloading agent RPCs.
+        return 8;
+    }
+
     private async Task initCLMS(string _name, string _id, string headID)
     {
         _ = ClmsHandler.RegisterRoutePoint(headID, _name, _id);
@@ -385,12 +397,13 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             // SAFETY: Use 75% of CPU cores max, but cap at reasonable limit for I/O-bound work
             // For 8 cores: 6 concurrent queries (75%), but allow up to 20 for I/O-bound operations
             // DYNAMIC: Adjust concurrency based on current CPU and memory usage
-            int baseConcurrency = (int)(Environment.ProcessorCount * 0.75);
-            var maxConcurrency = DynamicResourceManager.GetOptimalConcurrency(
-                minConcurrency: 4,
+            int baseConcurrency = Math.Max(2, (int)(Environment.ProcessorCount * 0.75));
+            var dynamicConcurrency = DynamicResourceManager.GetOptimalConcurrency(
+                minConcurrency: 2,
                 maxConcurrency: baseConcurrency,
                 baseConcurrency: baseConcurrency
             );
+            var maxConcurrency = Math.Min(dynamicConcurrency, GetStreamMaxConcurrency());
             var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
             var activeTasks = new List<Task>();
             

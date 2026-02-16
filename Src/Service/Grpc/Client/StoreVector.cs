@@ -9,6 +9,14 @@ namespace Gateway.Services.Grpc;
 
 public class StoreVectorService : StoreVector.StoreVectorClient
 {
+    private static int GetStoreTimeoutSeconds()
+    {
+        var raw = Environment.GetEnvironmentVariable("GATEWAY_STORE_TIMEOUT_SEC");
+        if (int.TryParse(raw, out var sec) && sec > 0)
+            return sec;
+        return 30;
+    }
+
     public override StoreVector_Res Store(StoreVector_Req request, CallOptions options)
     {
         try
@@ -19,7 +27,7 @@ public class StoreVectorService : StoreVector.StoreVectorClient
                 roundRobin: false
             );
 
-            var deadline = DateTime.UtcNow.AddSeconds(10); // Increased to 10s for storage operations
+            var deadline = DateTime.UtcNow.AddSeconds(GetStoreTimeoutSeconds());
             return _client.Store(request, deadline: deadline);
         }
         catch(RpcException ex)
