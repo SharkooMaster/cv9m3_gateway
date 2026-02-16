@@ -1,5 +1,6 @@
 
 using Gateway.Modules.Agneta;
+using Gateway.Utils;
 using Gateway.Utils.Globals;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -23,7 +24,7 @@ public class SearchVectorService : SearchVector.SearchVectorClient
             var _client = GrpcChannelFactory.GetClient(
                 target: _ip,
                 ctor: chan => new SearchVector.SearchVectorClient(chan),
-                roundRobin: (_port == "5000") ? false : true
+                roundRobin: LocalModeDetector.IsLocalMode()
             );
 
             var deadline = DateTime.UtcNow.AddSeconds(GetSearchTimeoutSeconds());

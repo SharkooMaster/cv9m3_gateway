@@ -1,5 +1,6 @@
 
 using Gateway.Modules.Agneta;
+using Gateway.Utils;
 using Gateway.Utils.Globals;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -24,7 +25,7 @@ public class StoreVectorService : StoreVector.StoreVectorClient
             var _client = GrpcChannelFactory.GetClient(
                 target: request.TargetIp,
                 ctor: chan => new StoreVector.StoreVectorClient(chan),
-                roundRobin: false
+                roundRobin: LocalModeDetector.IsLocalMode()
             );
 
             var deadline = DateTime.UtcNow.AddSeconds(GetStoreTimeoutSeconds());
