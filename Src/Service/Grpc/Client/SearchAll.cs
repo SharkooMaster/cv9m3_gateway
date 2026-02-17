@@ -553,16 +553,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                     catch (Exception storeEx)
                                     {
                                         Console.WriteLine($"[SearchAllStream] ❌ ERROR: Chunk storage failed for query {queryObj.Index}: {storeEx.Message}");
-                                        // Continue - compression can proceed, but chunk won't be stored
-                                        responseObj = new QueryResponseObject()
-                                        {
-                                            BucketId = 0,
-                                            BucketKey = 0,
-                                            Similarity = 1.0f,
-                                            Chunk = queryObj.Chunk, // fallback base
-                                            Index = queryObj.Index,
-                                            Duplicate = false
-                                        };
+                                        // Fail this query loudly; silent fallback can hide data-quality/store issues.
+                                        throw new RpcException(new Status(StatusCode.Internal, $"Store failed for query {queryObj.Index}: {storeEx.Message}"));
                                     }
                                 }
                                 else
@@ -607,11 +599,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                         catch (Exception storeEx)
                                         {
                                             Console.WriteLine($"[SearchAllStream] ❌ ERROR: Failed to store new chunk for query {queryObj.Index}: {storeEx.Message}");
-                                            // Fallback: still use self as base to avoid expansion
-                                            responseObj.BucketId = 0;
-                                            responseObj.BucketKey = 0;
-                                            responseObj.Chunk = queryObj.Chunk;
-                                            responseObj.Similarity = 1.0f;
+                                            // Fail this query loudly; silent fallback can hide invalid vector/store behavior.
+                                            throw new RpcException(new Status(StatusCode.Internal, $"Store(new) failed for query {queryObj.Index}: {storeEx.Message}"));
                                         }
                                     }
                                     else
