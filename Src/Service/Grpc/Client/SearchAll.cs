@@ -34,9 +34,10 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     private static readonly object _agentResolveLock = new object();
     private static DateTime _agentResolveAt = DateTime.MinValue;
     private static string[] _resolvedAgents = Array.Empty<string>();
+    private static int _roundRobinCounter = -1;
 
-    // Local-mode deterministic routing:
-    // Hash bucket key -> one agent endpoint for stable cache locality and even spread.
+    // Local-mode forced spread for benchmarking:
+    // strict round-robin over resolved agent pod IPs.
     private static string SelectAgentForBucket(string bucketKey)
     {
         if (!LocalModeDetector.IsLocalMode())
@@ -73,8 +74,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             return Globals.AgentsLoadbalancer;
         }
 
-        int hash = bucketKey?.GetHashCode() ?? 0;
-        int idx = Math.Abs(hash % _resolvedAgents.Length);
+        int idx = Math.Abs(Interlocked.Increment(ref _roundRobinCounter)) % _resolvedAgents.Length;
         return _resolvedAgents[idx];
     }
 
