@@ -1,6 +1,7 @@
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -30,6 +31,53 @@ public class Query
 
 public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 {
+    private static readonly object _agentResolveLock = new object();
+    private static DateTime _agentResolveAt = DateTime.MinValue;
+    private static string[] _resolvedAgents = Array.Empty<string>();
+
+    // Local-mode deterministic routing:
+    // Hash bucket key -> one agent endpoint for stable cache locality and even spread.
+    private static string SelectAgentForBucket(string bucketKey)
+    {
+        if (!LocalModeDetector.IsLocalMode())
+        {
+            return Globals.AgentsLoadbalancer;
+        }
+
+        var now = DateTime.UtcNow;
+        lock (_agentResolveLock)
+        {
+            if (_resolvedAgents.Length == 0 || now - _agentResolveAt > TimeSpan.FromSeconds(15))
+            {
+                try
+                {
+                    _resolvedAgents = Dns.GetHostAddresses(Globals.AgentsLoadbalancer)
+                        .Where(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                        .Select(ip => ip.ToString())
+                        .Distinct()
+                        .ToArray();
+                    _agentResolveAt = now;
+                    Console.WriteLine($"[SearchAll] Resolved {Globals.AgentsLoadbalancer} => [{string.Join(", ", _resolvedAgents)}]");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[SearchAll] DNS resolve failed for {Globals.AgentsLoadbalancer}: {ex.Message}");
+                    _resolvedAgents = Array.Empty<string>();
+                    _agentResolveAt = now;
+                }
+            }
+        }
+
+        if (_resolvedAgents.Length == 0)
+        {
+            return Globals.AgentsLoadbalancer;
+        }
+
+        int hash = bucketKey?.GetHashCode() ?? 0;
+        int idx = Math.Abs(hash % _resolvedAgents.Length);
+        return _resolvedAgents[idx];
+    }
+
     private static int GetStreamMaxConcurrency()
     {
         var raw = Environment.GetEnvironmentVariable("GATEWAY_STREAM_CONCURRENCY");
@@ -269,7 +317,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             string targetAgent;
             if (LocalModeDetector.IsLocalMode())
             {
-                targetAgent = Globals.AgentsLoadbalancer; // Direct to agent-1
+                targetAgent = SelectAgentForBucket(queries[i].query.BucketString);
             }
             else
             {
@@ -327,7 +375,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 string targetAgent;
                 if (LocalModeDetector.IsLocalMode())
                 {
-                    targetAgent = Globals.AgentsLoadbalancer; // Direct to agent-1
+                    targetAgent = SelectAgentForBucket(queries[item.Item2].query.BucketString);
                 }
                 else
                 {
@@ -431,7 +479,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                 string targetAgent;
                                 if (LocalModeDetector.IsLocalMode())
                                 {
-                                    targetAgent = Globals.AgentsLoadbalancer; // Direct to agent-1
+                                    targetAgent = SelectAgentForBucket(queryObj.BucketString);
                                 }
                                 else
                                 {
@@ -588,7 +636,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                     string targetAgent;
                                     if (LocalModeDetector.IsLocalMode())
                                     {
-                                        targetAgent = Globals.AgentsLoadbalancer; // Direct to agent-1
+                                        targetAgent = SelectAgentForBucket(queryObj.BucketString);
                                     }
                                     else
                                     {
