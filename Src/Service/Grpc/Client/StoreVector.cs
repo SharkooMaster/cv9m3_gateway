@@ -10,6 +10,10 @@ namespace Gateway.Services.Grpc;
 
 public class StoreVectorService : StoreVector.StoreVectorClient
 {
+    private static bool IsIpv4Literal(string target)
+        => System.Net.IPAddress.TryParse(target, out var ip)
+           && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
+
     private static int GetStoreTimeoutSeconds()
     {
         var raw = Environment.GetEnvironmentVariable("GATEWAY_STORE_TIMEOUT_SEC");
@@ -25,7 +29,9 @@ public class StoreVectorService : StoreVector.StoreVectorClient
             var _client = GrpcChannelFactory.GetClient(
                 target: request.TargetIp,
                 ctor: chan => new StoreVector.StoreVectorClient(chan),
-                roundRobin: LocalModeDetector.IsLocalMode()
+                // If target is already a concrete pod IP, dial directly (no LB policy needed).
+                // Use round-robin only when target is a DNS service name.
+                roundRobin: LocalModeDetector.IsLocalMode() && !IsIpv4Literal(request.TargetIp)
             );
 
             var deadline = DateTime.UtcNow.AddSeconds(GetStoreTimeoutSeconds());

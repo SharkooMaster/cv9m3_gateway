@@ -9,6 +9,10 @@ namespace Gateway.Services.Grpc;
 
 public class SearchVectorService : SearchVector.SearchVectorClient
 {
+    private static bool IsIpv4Literal(string target)
+        => System.Net.IPAddress.TryParse(target, out var ip)
+           && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
+
     private static int GetSearchTimeoutSeconds()
     {
         var raw = Environment.GetEnvironmentVariable("GATEWAY_SEARCH_TIMEOUT_SEC");
@@ -24,7 +28,9 @@ public class SearchVectorService : SearchVector.SearchVectorClient
             var _client = GrpcChannelFactory.GetClient(
                 target: _ip,
                 ctor: chan => new SearchVector.SearchVectorClient(chan),
-                roundRobin: LocalModeDetector.IsLocalMode()
+                // If target is already a concrete pod IP, dial directly (no LB policy needed).
+                // Use round-robin only when target is a DNS service name.
+                roundRobin: LocalModeDetector.IsLocalMode() && !IsIpv4Literal(_ip)
             );
 
             var deadline = DateTime.UtcNow.AddSeconds(GetSearchTimeoutSeconds());

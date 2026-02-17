@@ -38,7 +38,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
     // Local-mode forced spread for benchmarking:
     // strict round-robin over resolved agent pod IPs.
-    private static string SelectAgentForBucket(string bucketKey)
+    private static string SelectAgentForBucket(string _bucketKey)
     {
         if (!LocalModeDetector.IsLocalMode())
         {
@@ -63,7 +63,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[SearchAll] DNS resolve failed for {Globals.AgentsLoadbalancer}: {ex.Message}");
-                    _resolvedAgents = Array.Empty<string>();
+                    // Keep the previous resolved list if we already have one;
+                    // transient DNS failures should not collapse routing back to a single service target.
                     _agentResolveAt = now;
                 }
             }
