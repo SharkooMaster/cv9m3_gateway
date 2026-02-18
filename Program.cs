@@ -19,6 +19,8 @@ using Gateway.Modules;
 using Gateway.Services.Clms;
 using Gateway.Services.Storage;
 using Gateway.Utils;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +34,31 @@ builder.Services.AddGrpc(options => {
     options.MaxReceiveMessageSize = 1000 * 1024 * 1024;
     options.MaxSendMessageSize = 1000 * 1024 * 1024;
 });
+
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing =>
+    {
+        tracing
+            .SetResourceBuilder(Observability.CreateResourceBuilder())
+            .AddSource("CrossV9.Gateway")
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddOtlpExporter(otlp =>
+            {
+                otlp.Endpoint = new Uri(Observability.GetOtlpEndpoint());
+                otlp.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
+            });
+    })
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .SetResourceBuilder(Observability.CreateResourceBuilder())
+            .AddMeter("CrossV9.Gateway")
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddRuntimeInstrumentation()
+            .AddPrometheusExporter();
+    });
 
 ConfigureServices(builder.Services);
 
@@ -74,6 +101,7 @@ if (app.Environment.IsDevelopment())
 
 //app.UseHttpsRedirection();
 app.UseRouting();
+app.MapPrometheusScrapingEndpoint("/metrics");
 
 app.MapGrpcService<GreeterService>();
 app.MapGrpcService<BatchSearchService>();

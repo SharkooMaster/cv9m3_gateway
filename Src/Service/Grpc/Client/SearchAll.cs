@@ -416,6 +416,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         IServerStreamWriter<QueryResponseObject> responseStream,
         ServerCallContext context)
     {
+        using var rootSpan = Observability.StartStage("SearchAllStream");
         try
         {
             // OPTIMIZATION: Process queries in parallel instead of sequentially
@@ -428,6 +429,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             // Background task to read queries from stream
             var readTask = Task.Run(async () =>
             {
+                var ingestSw = Stopwatch.StartNew();
                 try
                 {
                     await foreach (var queryObj in requestStream.ReadAllAsync(context.CancellationToken))
@@ -439,6 +441,11 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 catch (Exception ex)
                 {
                     queryChannel.Writer.Complete(ex);
+                }
+                finally
+                {
+                    ingestSw.Stop();
+                    Observability.RecordStage("Ingress", ingestSw.Elapsed.TotalMilliseconds);
                 }
             }, context.CancellationToken);
             
@@ -470,9 +477,13 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                         // Process query in parallel
                         var task = Task.Run(async () =>
                         {
+                            var querySw = Stopwatch.StartNew();
                             try
                             {
+                                using var querySpan = Observability.StartStage("ProcessQuery");
+                                querySpan?.SetTag("query.index", queryObj.Index);
                                 // Get neighboring buckets for this query (with optimal ordering based on LSH vector confidence)
+                                var routeSw = Stopwatch.StartNew();
                                 List<string> buckets = GetNeighbouringBuckets(queryObj.BucketString, queryObj.Vector);
                                 
                                 // LOCAL MODE: Skip DHT routing, go directly to agent-1
@@ -493,6 +504,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                     );
                                     Console.WriteLine($"[SearchAllStream] DHT routing: bucket {queryObj.BucketString} -> agent {targetAgent}");
                                 }
+                                routeSw.Stop();
+                                Observability.RecordStage("Route", routeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
                                 
                                 // Create search request
                                 SearchVector_Req req = new SearchVector_Req()
@@ -506,7 +519,10 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                 
                                 // Search in the DHT-determined agent (distributes load across all agents)
                                 Console.WriteLine($"[SearchAllStream] Searching for query {queryObj.Index} in agent {targetAgent}");
+                                var searchSw = Stopwatch.StartNew();
                                 SearchVector_Result res = await Globals.svs.ClientGet(req, targetAgent, "5000", context.CancellationToken);
+                                searchSw.Stop();
+                                Observability.RecordStage("SearchBuckets", searchSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
                                 Console.WriteLine($"[SearchAllStream] Search result for query {queryObj.Index}: Save={res.Save}, Results.Count={res.Results.Count}");
                                 
                                 QueryResponseObject responseObj;
@@ -531,11 +547,14 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                     // Wait for chunk storage to complete - ensures chunks are actually stored
                                     try
                                     {
+                                        var storeSw = Stopwatch.StartNew();
                                         var callOptions = new CallOptions(
                                             deadline: DateTime.UtcNow.AddSeconds(10), // 10s deadline for storage
                                             cancellationToken: context.CancellationToken
                                         );
                                         var storeRes = Globals.svec.Store(storeReq, callOptions);
+                                        storeSw.Stop();
+                                        Observability.RecordStage("DiffEncode", storeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index), ("stored", true));
                                         Console.WriteLine($"[SearchAllStream] ✅ Stored chunk for query {queryObj.Index}: id={storeRes.Id}, index={storeRes.Index}, chunk size={queryObj.Chunk.Length} bytes");
 
                                         // IMPORTANT: When no similar chunk exists, the stored chunk becomes the base.
@@ -583,11 +602,14 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                         
                                         try
                                         {
+                                            var storeSw = Stopwatch.StartNew();
                                             var callOptions = new CallOptions(
                                                 deadline: DateTime.UtcNow.AddSeconds(10),
                                                 cancellationToken: context.CancellationToken
                                             );
                                             var storeRes = Globals.svec.Store(storeReq, callOptions);
+                                            storeSw.Stop();
+                                            Observability.RecordStage("DiffEncode", storeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index), ("stored", true));
                                             Console.WriteLine($"[SearchAllStream] ✅ Stored new chunk (similarity={responseObj.Similarity:F3} < {Globals.MinThresh}) for query {queryObj.Index}: id={storeRes.Id}, index={storeRes.Index}");
 
                                             // Replace response with reference to the newly stored chunk as base (prevents huge patches)
@@ -611,7 +633,10 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                 }
 
                                 // Write result to channel (stream as ready)
+                                var serializeSw = Stopwatch.StartNew();
                                 await resultChannel.Writer.WriteAsync((responseObj, queryObj.Index), context.CancellationToken);
+                                serializeSw.Stop();
+                                Observability.RecordStage("Serialize", serializeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
                             }
                             catch (Exception ex)
                             {
@@ -673,6 +698,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             }
                             finally
                             {
+                                querySw.Stop();
+                                Observability.RecordStage("Egress", querySw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
                                 semaphore.Release();
                             }
                         }, context.CancellationToken);
