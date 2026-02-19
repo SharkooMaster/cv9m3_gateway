@@ -628,8 +628,11 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             }
                             catch (Exception ex)
                             {
-                                // When search fails, we need to store the chunk anyway
-                                // Try to store it using DHT routing (or direct in local mode)
+                                Console.WriteLine($"[SearchAllStream] Error processing query {queryObj.Index}: {ex.Message}");
+                                // When search fails, try to store the chunk and use the stored reference.
+                                // This prevents the Cross encoder from falling back to raw-embed unnecessarily.
+                                ulong storedBucketId = 0;
+                                ulong storedBucketKey = 0;
                                 try
                                 {
                                     string targetAgent;
@@ -660,21 +663,25 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                         cancellationToken: context.CancellationToken
                                     );
                                     var storeRes = Globals.svec.Store(storeReq, callOptions);
+                                    storedBucketId = storeRes.Id;
+                                    storedBucketKey = storeRes.Index;
+                                    Console.WriteLine($"[SearchAllStream] ✅ Stored chunk after error for query {queryObj.Index}: id={storedBucketId}");
                                 }
-                                catch (Exception)
+                                catch (Exception storeEx)
                                 {
+                                    Console.WriteLine($"[SearchAllStream] ⚠️ Store also failed for query {queryObj.Index}: {storeEx.Message}");
                                 }
                                 
-                                // Create a default response object so compression can continue
-                                // Mark as needing save since we couldn't find a match
+                                // Return response with stored reference (if store succeeded) or 0,0 (raw-embed fallback).
+                                // Either way, Chunk = original data so Cross encoder can use it.
                                 var errorResponseObj = new QueryResponseObject()
                                 {
-                                    BucketId = 0,
-                                    BucketKey = 0,
-                                    Similarity = 0,
-                                    Chunk = queryObj.Chunk, // Use original chunk
+                                    BucketId = storedBucketId,
+                                    BucketKey = storedBucketKey,
+                                    Similarity = storedBucketId > 0 ? 1.0f : 0f,
+                                    Chunk = queryObj.Chunk,
                                     Index = queryObj.Index,
-                                    Duplicate = false // Not a duplicate, needs encoding
+                                    Duplicate = false
                                 };
                                 await resultChannel.Writer.WriteAsync((errorResponseObj, queryObj.Index), context.CancellationToken);
                             }
