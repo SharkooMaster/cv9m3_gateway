@@ -244,47 +244,56 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
     {
         QueryResponseObject ret = new QueryResponseObject();
 
-        // FIXED: Handle case where no results found
         if (incoming.Results == null || incoming.Results.Count == 0)
         {
-            // No results found - return default response indicating chunk needs to be stored
             ret.BucketId = 0;
             ret.BucketKey = 0;
             ret.Chunk = query.query.Chunk;
             ret.Index = query.query.Index;
             ret.Similarity = 0.0f;
-            ret.Duplicate = false; // Not a duplicate, needs to be stored
+            ret.Duplicate = false;
             return ret;
         }
 
-        int bestIndex = -1;
-        int bestIndexSim = 0;
-        int[]? bestIndexDeltas = null;
-        for (int i = 0; i < incoming.Results.Count; i++)
+        // With K=1 the agent already picked the best cosine match.
+        // Only run SubtractAVX2 when we have multiple results AND chunk bytes.
+        var best = incoming.Results[0];
+        float bestSim = best.Similarity;
+        int bestIndex = 0;
+
+        if (incoming.Results.Count > 1)
         {
-            (int[], int) subRes = SubtractAVX2(query.query.Chunk.ToArray(), incoming.Results[i].Chunk.ToArray());
-            if (subRes.Item2 > bestIndexSim)
+            // Multiple results — byte-level comparison to pick the true best
+            int bestByteSim = 0;
+            for (int i = 0; i < incoming.Results.Count; i++)
             {
-                bestIndex = i;
-                bestIndexSim = subRes.Item2;
-                bestIndexDeltas = subRes.Item1;
+                var r = incoming.Results[i];
+                if (r.Chunk == null || r.Chunk.Length == 0) continue;
+                (int[] _, int eqCount) = SubtractAVX2(query.query.Chunk.ToArray(), r.Chunk.ToArray());
+                if (eqCount > bestByteSim)
+                {
+                    bestByteSim = eqCount;
+                    bestIndex = i;
+                }
             }
+            best = incoming.Results[bestIndex];
+            if (bestByteSim > 0 && best.Chunk.Length > 0)
+                bestSim = (float)bestByteSim / best.Chunk.Length;
         }
+        else if (best.Chunk != null && best.Chunk.Length > 0)
+        {
+            // Single result with chunk bytes — compute exact byte-level similarity
+            (int[] _, int eqCount) = SubtractAVX2(query.query.Chunk.ToArray(), best.Chunk.ToArray());
+            bestSim = (float)eqCount / best.Chunk.Length;
+        }
+        // else: no chunk bytes — use cosine similarity from agent (already in best.Similarity)
 
-        if(bestIndex < 0){ throw new Exception("Error: bestIndex in SelectBestResult resulted in -1. Index our of range"); }
-
-        ret.BucketId = incoming.Results[bestIndex].BucketId;
-        ret.BucketKey = (ulong)incoming.Results[bestIndex].BucketKey;
-        ret.Chunk = incoming.Results[bestIndex].Chunk;
-        ret.Index = incoming.Results[bestIndex].Index;
-        
-        // Calculate byte-level similarity (how many bytes match)
-        float byteSimilarity = (float)bestIndexSim / incoming.Results[bestIndex].Chunk.Length;
-        ret.Similarity = byteSimilarity;
-        
-        // We use Duplicate as a reporting flag: true means "we found an existing base reference worth using"
-        // (i.e., match >= MinThresh). false means "no match, chunk had to be stored".
-        ret.Duplicate = byteSimilarity >= Globals.MinThresh;
+        ret.BucketId = best.BucketId;
+        ret.BucketKey = (ulong)best.BucketKey;
+        ret.Chunk = (best.Chunk != null && best.Chunk.Length > 0) ? best.Chunk : query.query.Chunk;
+        ret.Index = best.Index;
+        ret.Similarity = bestSim;
+        ret.Duplicate = bestSim >= Globals.MinThresh;
 
         return ret;
     }
@@ -550,7 +559,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                         Observability.RecordStage("DiffEncode", storeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index), ("stored", true));
 
                                         // IMPORTANT: When no similar chunk exists, the stored chunk becomes the base.
-                                        // Base == original => error encoding is empty.
+                                        // Base == original => error encoding is empty. Mark Duplicate=true so Cross skips diff.
                                         responseObj = new QueryResponseObject()
                                         {
                                             BucketId = storeRes.Id,
@@ -558,7 +567,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                             Similarity = 1.0f,
                                             Chunk = queryObj.Chunk, // base chunk == original
                                             Index = queryObj.Index,
-                                            Duplicate = false
+                                            Duplicate = true
                                         };
                                     }
                                     catch (Exception storeEx)
@@ -607,6 +616,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                             responseObj.BucketKey = storeRes.Index;
                                             responseObj.Chunk = queryObj.Chunk; // base chunk == original
                                             responseObj.Similarity = 1.0f;
+                                            responseObj.Duplicate = true; // base == original, Cross can skip diff
                                         }
                                         catch (Exception storeEx)
                                         {
@@ -628,7 +638,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"[SearchAllStream] Error processing query {queryObj.Index}: {ex.Message}");
+                                // Error processing query — attempt emergency store
                                 // When search fails, try to store the chunk and use the stored reference.
                                 // This prevents the Cross encoder from falling back to raw-embed unnecessarily.
                                 ulong storedBucketId = 0;
@@ -665,11 +675,11 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                     var storeRes = Globals.svec.Store(storeReq, callOptions);
                                     storedBucketId = storeRes.Id;
                                     storedBucketKey = storeRes.Index;
-                                    Console.WriteLine($"[SearchAllStream] ✅ Stored chunk after error for query {queryObj.Index}: id={storedBucketId}");
+                                    // Emergency store succeeded
                                 }
                                 catch (Exception storeEx)
                                 {
-                                    Console.WriteLine($"[SearchAllStream] ⚠️ Store also failed for query {queryObj.Index}: {storeEx.Message}");
+                                    // Emergency store also failed
                                 }
                                 
                                 // Return response with stored reference (if store succeeded) or 0,0 (raw-embed fallback).
@@ -681,7 +691,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                     Similarity = storedBucketId > 0 ? 1.0f : 0f,
                                     Chunk = queryObj.Chunk,
                                     Index = queryObj.Index,
-                                    Duplicate = false
+                                    Duplicate = storedBucketId > 0 // base == original when store succeeded
                                 };
                                 await resultChannel.Writer.WriteAsync((errorResponseObj, queryObj.Index), context.CancellationToken);
                             }
