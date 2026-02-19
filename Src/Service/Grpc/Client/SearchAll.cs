@@ -305,8 +305,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 buckets = GetNeighbouringBuckets(qObj.BucketString, qObj.Vector)
             });
         }
-        Console.WriteLine($"len: {queries.Count}");
-
         // Search   []
         ConcurrentBag<(SearchVectorObject, int)> saveQueue = new ConcurrentBag<(SearchVectorObject, int)>();
 
@@ -397,11 +395,9 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 storeReq.Chunk = item.Item1.Chunk;
                 
                 var storeRes = Globals.svec.Store(storeReq);
-                Console.WriteLine($"[SearchAll] Stored chunk via Agent, id: {storeRes.Id}");
             }
-            catch (Exception storeEx)
+            catch (Exception)
             {
-                Console.WriteLine($"[SearchAll] Failed to store chunk via Agent: {storeEx.Message}");
                 // Continue anyway - chunk metadata might already be stored
             }
         }
@@ -502,7 +498,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                         Globals.AgentsLoadbalancer, 
                                         context.CancellationToken
                                     );
-                                    Console.WriteLine($"[SearchAllStream] DHT routing: bucket {queryObj.BucketString} -> agent {targetAgent}");
                                 }
                                 routeSw.Stop();
                                 Observability.RecordStage("Route", routeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
@@ -518,12 +513,10 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                 req.Bitstrings.AddRange(buckets);
                                 
                                 // Search in the DHT-determined agent (distributes load across all agents)
-                                Console.WriteLine($"[SearchAllStream] Searching for query {queryObj.Index} in agent {targetAgent}");
                                 var searchSw = Stopwatch.StartNew();
                                 SearchVector_Result res = await Globals.svs.ClientGet(req, targetAgent, "5000", context.CancellationToken);
                                 searchSw.Stop();
                                 Observability.RecordStage("SearchBuckets", searchSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
-                                Console.WriteLine($"[SearchAllStream] Search result for query {queryObj.Index}: Save={res.Save}, Results.Count={res.Results.Count}");
                                 
                                 QueryResponseObject responseObj;
                                 
@@ -555,7 +548,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                         var storeRes = Globals.svec.Store(storeReq, callOptions);
                                         storeSw.Stop();
                                         Observability.RecordStage("DiffEncode", storeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index), ("stored", true));
-                                        Console.WriteLine($"[SearchAllStream] ✅ Stored chunk for query {queryObj.Index}: id={storeRes.Id}, index={storeRes.Index}, chunk size={queryObj.Chunk.Length} bytes");
 
                                         // IMPORTANT: When no similar chunk exists, the stored chunk becomes the base.
                                         // Base == original => error encoding is empty.
@@ -571,7 +563,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                     }
                                     catch (Exception storeEx)
                                     {
-                                        Console.WriteLine($"[SearchAllStream] ❌ ERROR: Chunk storage failed for query {queryObj.Index}: {storeEx.Message}");
                                         // Fail this query loudly; silent fallback can hide data-quality/store issues.
                                         throw new RpcException(new Status(StatusCode.Internal, $"Store failed for query {queryObj.Index}: {storeEx.Message}"));
                                     }
@@ -610,7 +601,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                             var storeRes = Globals.svec.Store(storeReq, callOptions);
                                             storeSw.Stop();
                                             Observability.RecordStage("DiffEncode", storeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index), ("stored", true));
-                                            Console.WriteLine($"[SearchAllStream] ✅ Stored new chunk (similarity={responseObj.Similarity:F3} < {Globals.MinThresh}) for query {queryObj.Index}: id={storeRes.Id}, index={storeRes.Index}");
 
                                             // Replace response with reference to the newly stored chunk as base (prevents huge patches)
                                             responseObj.BucketId = storeRes.Id;
@@ -620,7 +610,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                         }
                                         catch (Exception storeEx)
                                         {
-                                            Console.WriteLine($"[SearchAllStream] ❌ ERROR: Failed to store new chunk for query {queryObj.Index}: {storeEx.Message}");
                                             // Fail this query loudly; silent fallback can hide invalid vector/store behavior.
                                             throw new RpcException(new Status(StatusCode.Internal, $"Store(new) failed for query {queryObj.Index}: {storeEx.Message}"));
                                         }
@@ -628,7 +617,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                     else
                                     {
                                         // Similarity >= MinThresh, found near-duplicate - use it for deduplication, DON'T store new chunk
-                                        Console.WriteLine($"[SearchAllStream] Using similar chunk (similarity={responseObj.Similarity:F3} >= {Globals.MinThresh}) for query {queryObj.Index}, NOT storing new chunk");
                                     }
                                 }
 
@@ -640,10 +628,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             }
                             catch (Exception ex)
                             {
-                                // Log error but continue processing other queries
-                                Console.WriteLine($"[SearchAllStream] Error processing query {queryObj.Index}: {ex.Message}");
-                                Console.WriteLine($"[SearchAllStream] Stack trace: {ex.StackTrace}");
-                                
                                 // When search fails, we need to store the chunk anyway
                                 // Try to store it using DHT routing (or direct in local mode)
                                 try
@@ -676,11 +660,9 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                         cancellationToken: context.CancellationToken
                                     );
                                     var storeRes = Globals.svec.Store(storeReq, callOptions);
-                                    Console.WriteLine($"[SearchAllStream] ✅ Stored chunk after error for query {queryObj.Index}: id={storeRes.Id}");
                                 }
-                                catch (Exception storeEx)
+                                catch (Exception)
                                 {
-                                    Console.WriteLine($"[SearchAllStream] ❌ Failed to store chunk after error for query {queryObj.Index}: {storeEx.Message}");
                                 }
                                 
                                 // Create a default response object so compression can continue
