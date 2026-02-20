@@ -43,4 +43,3 @@ message BatchSearchVector_Result
 {
     repeated SearchVector_Result results = 1;
 }
-
