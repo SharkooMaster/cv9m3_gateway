@@ -532,50 +532,19 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                 
                                 if (res.Save)
                                 {
-                                    // New chunk needs to be saved - call Agent to store it
-                                    SearchVectorObject svr = res.Results[0];
-                                    svr.Chunk = queryObj.Chunk; // Use original chunk
-                                    
-                                    // Store via Agent's StoreVector service (Agent will store locally)
-                                    // Use the same DHT-determined agent for storage consistency
-                                    StoreVector_Req storeReq = new StoreVector_Req
+                                    // OPTIMIZATION: Don't store here - Cross will handle it in background
+                                    // Just return flags so Cross knows to store it
+                                    responseObj = new QueryResponseObject()
                                     {
-                                        TargetIp = targetAgent, // Use DHT-determined agent for storage
-                                        Bitstring = queryObj.BucketString,
-                                        HeadRouteID = ""
+                                        BucketId = 0, // Will be set by Cross after booking ID
+                                        BucketKey = 0,
+                                        Similarity = 1.0f,
+                                        Chunk = ByteString.Empty, // No chunk bytes needed
+                                        Index = queryObj.Index,
+                                        Duplicate = true, // Will be stored, so base == original
+                                        NeedToStore = true, // Flag: Cross needs to store this
+                                        TargetAgent = targetAgent // Which agent to store to
                                     };
-                                    storeReq.Vector.AddRange(queryObj.Vector);
-                                    storeReq.Chunk = queryObj.Chunk;
-                                    
-                                    // Wait for chunk storage to complete - ensures chunks are actually stored
-                                    try
-                                    {
-                                        var storeSw = Stopwatch.StartNew();
-                                        var callOptions = new CallOptions(
-                                            deadline: DateTime.UtcNow.AddSeconds(10), // 10s deadline for storage
-                                            cancellationToken: context.CancellationToken
-                                        );
-                                        var storeRes = Globals.svec.Store(storeReq, callOptions);
-                                        storeSw.Stop();
-                                        Observability.RecordStage("DiffEncode", storeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index), ("stored", true));
-
-                                        // IMPORTANT: When no similar chunk exists, the stored chunk becomes the base.
-                                        // Base == original => error encoding is empty. Mark Duplicate=true so Cross skips diff.
-                                        responseObj = new QueryResponseObject()
-                                        {
-                                            BucketId = storeRes.Id,
-                                            BucketKey = storeRes.Index,
-                                            Similarity = 1.0f,
-                                            Chunk = queryObj.Chunk, // base chunk == original
-                                            Index = queryObj.Index,
-                                            Duplicate = true
-                                        };
-                                    }
-                                    catch (Exception storeEx)
-                                    {
-                                        // Fail this query loudly; silent fallback can hide data-quality/store issues.
-                                        throw new RpcException(new Status(StatusCode.Internal, $"Store failed for query {queryObj.Index}: {storeEx.Message}"));
-                                    }
                                 }
                                 else
                                 {
@@ -590,40 +559,15 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                     // Only store if similarity < MinThresh (no good match found across all searched buckets)
                                     if (responseObj.Similarity < Globals.MinThresh)
                                     {
-                                        // No similar chunk found - store this chunk for future reuse.
-                                        // IMPORTANT: The newly stored chunk becomes the base for compression (base == original).
-                                        StoreVector_Req storeReq = new StoreVector_Req
-                                        {
-                                            TargetIp = targetAgent,
-                                            Bitstring = queryObj.BucketString,
-                                            HeadRouteID = ""
-                                        };
-                                        storeReq.Vector.AddRange(queryObj.Vector);
-                                        storeReq.Chunk = queryObj.Chunk;
-                                        
-                                        try
-                                        {
-                                            var storeSw = Stopwatch.StartNew();
-                                            var callOptions = new CallOptions(
-                                                deadline: DateTime.UtcNow.AddSeconds(10),
-                                                cancellationToken: context.CancellationToken
-                                            );
-                                            var storeRes = Globals.svec.Store(storeReq, callOptions);
-                                            storeSw.Stop();
-                                            Observability.RecordStage("DiffEncode", storeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index), ("stored", true));
-
-                                            // Replace response with reference to the newly stored chunk as base (prevents huge patches)
-                                            responseObj.BucketId = storeRes.Id;
-                                            responseObj.BucketKey = storeRes.Index;
-                                            responseObj.Chunk = queryObj.Chunk; // base chunk == original
-                                            responseObj.Similarity = 1.0f;
-                                            responseObj.Duplicate = true; // base == original, Cross can skip diff
-                                        }
-                                        catch (Exception storeEx)
-                                        {
-                                            // Fail this query loudly; silent fallback can hide invalid vector/store behavior.
-                                            throw new RpcException(new Status(StatusCode.Internal, $"Store(new) failed for query {queryObj.Index}: {storeEx.Message}"));
-                                        }
+                                        // OPTIMIZATION: Don't store here - Cross will handle it in background
+                                        // Just return flags so Cross knows to store it
+                                        responseObj.BucketId = 0; // Will be set by Cross after booking ID
+                                        responseObj.BucketKey = 0;
+                                        responseObj.Chunk = ByteString.Empty; // No chunk bytes needed
+                                        responseObj.Similarity = 1.0f;
+                                        responseObj.Duplicate = true; // Will be stored, so base == original
+                                        responseObj.NeedToStore = true; // Flag: Cross needs to store this
+                                        responseObj.TargetAgent = targetAgent; // Which agent to store to
                                     }
                                     else
                                     {
