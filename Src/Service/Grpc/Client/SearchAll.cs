@@ -87,9 +87,9 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             return configured;
         }
 
-        // High-throughput default: Use 2x CPU cores for I/O-bound work (queries are I/O-bound, not CPU-bound)
-        // With 152 cores available, this allows significant parallelism
-        return Math.Max(50, Environment.ProcessorCount * 2);
+        // No cap: Use unlimited concurrency for I/O-bound work
+        // System will naturally limit based on available resources
+        return int.MaxValue;
     }
 
     private async Task initCLMS(string _name, string _id, string headID)
@@ -318,8 +318,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         // Search   []
         ConcurrentBag<(SearchVectorObject, int)> saveQueue = new ConcurrentBag<(SearchVectorObject, int)>();
 
-        // High-throughput: Use 2x CPU cores for I/O-bound parallel queries
-        ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = Math.Max(50, Environment.ProcessorCount * 2) };
+        // No cap: Use unlimited parallelism for I/O-bound parallel queries
+        ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = -1 }; // -1 = unlimited
         await Parallel.ForAsync(0, queries.Count, options, async (i, ct) =>
         {
             // LOCAL MODE: Skip DHT routing, go directly to agent-1
@@ -456,14 +456,13 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 }
             }, context.CancellationToken);
             
-            // Process queries in parallel with concurrency limit
-            // OPTIMIZED: Use 2x CPU cores for I/O-bound work (network calls to agents)
-            // With 152 cores available, we can handle much higher concurrency
-            // DYNAMIC: Adjust concurrency based on current CPU and memory usage
-            int baseConcurrency = Math.Max(50, Environment.ProcessorCount * 2); // 2x for I/O-bound
+            // Process queries in parallel - NO ARTIFICIAL CAPS
+            // Let the system use as much concurrency as it can handle
+            // DYNAMIC: Adjust concurrency based on current CPU and memory usage only
+            int baseConcurrency = Environment.ProcessorCount * 4; // 4x for I/O-bound (network calls)
             var dynamicConcurrency = DynamicResourceManager.GetOptimalConcurrency(
-                minConcurrency: 50, // Higher minimum for high-throughput
-                maxConcurrency: baseConcurrency,
+                minConcurrency: Environment.ProcessorCount, // Start with all cores
+                maxConcurrency: int.MaxValue, // No artificial cap
                 baseConcurrency: baseConcurrency
             );
             var maxConcurrency = Math.Min(dynamicConcurrency, GetStreamMaxConcurrency());

@@ -14,10 +14,11 @@ public static class DynamicResourceManager
     private static double _lastMemoryUsage = 0.0;
     private static readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(2);
 
-    private const double CPU_HIGH_THRESHOLD = 0.80;
-    private const double CPU_MEDIUM_THRESHOLD = 0.60;
-    private const double MEMORY_HIGH_THRESHOLD = 0.85;
-    private const double MEMORY_MEDIUM_THRESHOLD = 0.70;
+    // Relaxed thresholds: Only throttle when system is truly overloaded
+    private const double CPU_HIGH_THRESHOLD = 0.95;  // Only throttle at 95% CPU
+    private const double CPU_MEDIUM_THRESHOLD = 0.90; // Start reducing at 90%
+    private const double MEMORY_HIGH_THRESHOLD = 0.95;  // Only throttle at 95% memory
+    private const double MEMORY_MEDIUM_THRESHOLD = 0.90; // Start reducing at 90%
 
     public static int GetOptimalConcurrency(int minConcurrency, int maxConcurrency, int baseConcurrency)
     {
@@ -41,8 +42,10 @@ public static class DynamicResourceManager
 
     public static int GetOptimalParallelism(int baseParallelism)
     {
-        int minParallelism = Math.Max(1, baseParallelism / 4);
-        int maxParallelism = baseParallelism;
+        // No artificial minimum - let system use what it needs
+        // Only throttle if system is truly overloaded (via GetOptimalConcurrency)
+        int minParallelism = baseParallelism; // Start with full parallelism
+        int maxParallelism = int.MaxValue; // No cap
         return GetOptimalConcurrency(minParallelism, maxParallelism, baseParallelism);
     }
 
