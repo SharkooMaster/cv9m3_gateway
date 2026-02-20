@@ -280,95 +280,94 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
     {
-        QueryResponse response = new QueryResponse();
-        ConcurrentBag<QueryResponseObject> responseObjects = new ConcurrentBag<QueryResponseObject>();
+        var response = new QueryResponse();
+        if (request.QueryObjects.Count == 0) return response;
 
-        // Create a class that can hold a query and its neighbours  [x]
-        List<Query> queries = new List<Query>();
-        for (int i = 0; i < request.QueryObjects.Count(); i++)
+        // Route & group queries by agent
+        var queryInfos = new (QueryObject query, List<string> buckets, string agent)[request.QueryObjects.Count];
+        Parallel.For(0, request.QueryObjects.Count, i =>
         {
-            var qObj = request.QueryObjects[i];
-            queries.Add(new Query()
-            {
-                query = qObj,
-                buckets = GetNeighbouringBuckets(qObj.BucketString, qObj.Vector)
-            });
-        }
-        // Search   []
-        ConcurrentBag<(SearchVectorObject, int)> saveQueue = new ConcurrentBag<(SearchVectorObject, int)>();
-
-        // No cap: Use unlimited parallelism for I/O-bound parallel queries
-        ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = -1 }; // -1 = unlimited
-        await Parallel.ForAsync(0, queries.Count, options, async (i, ct) =>
-        {
-            string targetAgent = RouteToAgent(queries[i].query.BucketString);
-            
-            SearchVector_Req req = new SearchVector_Req()
-            {
-                Index = queries[i].query.Index,
-                MinimumSimilarity = Globals.MinThresh,
-                K = Globals.K
-            };
-            req.Vector.AddRange(queries[i].query.Vector);
-            req.Bitstrings.AddRange(queries[i].buckets);
-            SearchVector_Result res = await Globals.svs.ClientGet(req, targetAgent);
-
-            if (res.Save)
-            {
-                SearchVectorObject svr = res.Results[0];
-                // Insert actual chunk into responseObject
-                svr.Chunk = request.QueryObjects[svr.Index].Chunk;
-                // Add to save queue
-                saveQueue.Add((svr, i));
-                // Insert to response
-                responseObjects.Add(new QueryResponseObject()
-                {
-                    BucketId = svr.BucketId,
-                    BucketKey = (ulong)svr.BucketKey,
-                    Similarity = svr.Similarity,
-                    Chunk = svr.Chunk,
-                    Index = svr.Index,
-                    Duplicate = true
-                });
-            }
-            else
-            {
-                // Filter for best results per query class per response
-                QueryResponseObject bestFit = SelectBestResult(res, queries[i]);
-                responseObjects.Add(bestFit);
-            }
+            var q = request.QueryObjects[i];
+            var buckets = GetNeighbouringBuckets(q.BucketString, q.Vector);
+            var agent = RouteToAgent(q.BucketString);
+            queryInfos[i] = (q, buckets, agent);
         });
 
-        // Save the results that needs saving - call Agent to store chunks
-        foreach ((SearchVectorObject,int) item in saveQueue)
+        var agentGroups = new Dictionary<string, List<int>>();
+        for (int i = 0; i < queryInfos.Length; i++)
         {
-            try
+            if (!agentGroups.TryGetValue(queryInfos[i].agent, out var list))
             {
-                string targetAgent = RouteToAgent(queries[item.Item2].query.BucketString);
-                
-                StoreVector_Req storeReq = new StoreVector_Req
-                {
-                    TargetIp = targetAgent, // Use DHT-determined agent for storage
-                    Bitstring = queries[item.Item2].query.BucketString,
-                    HeadRouteID = ""
-                };
-                storeReq.Vector.AddRange(queries[item.Item2].query.Vector);
-                if (item.Item1.Chunk == null || item.Item1.Chunk.Length == 0)
-                {
-                    continue;
-                }
-                storeReq.Chunk = item.Item1.Chunk;
-                
-                var storeRes = Globals.svec.Store(storeReq);
+                list = new List<int>();
+                agentGroups[queryInfos[i].agent] = list;
             }
-            catch (Exception)
-            {
-                // Continue anyway - chunk metadata might already be stored
-            }
+            list.Add(i);
         }
 
-        // Respond properly
-        response.Results.AddRange(responseObjects);
+        // Batch search per agent
+        var results = new QueryResponseObject[request.QueryObjects.Count];
+        var tasks = new List<Task>();
+        foreach (var (agent, indices) in agentGroups)
+        {
+            var a = agent; var idxs = indices;
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    var batchReq = new BatchSearchVector_Req();
+                    foreach (var idx in idxs)
+                    {
+                        var info = queryInfos[idx];
+                        var req = new SearchVector_Req { Index = info.query.Index, MinimumSimilarity = Globals.MinThresh, K = Globals.K };
+                        req.Vector.AddRange(info.query.Vector);
+                        req.Bitstrings.AddRange(info.buckets);
+                        batchReq.Queries.Add(req);
+                    }
+                    var batchRes = await Globals.svs.ClientBatchGet(batchReq, a, context.CancellationToken);
+                    for (int j = 0; j < idxs.Count && j < batchRes.Results.Count; j++)
+                    {
+                        results[idxs[j]] = BuildResponseObj(batchRes.Results[j], queryInfos[idxs[j]].query, queryInfos[idxs[j]].buckets, a);
+                    }
+                }
+                catch
+                {
+                    foreach (var idx in idxs)
+                        results[idx] = new QueryResponseObject { BucketId = 0, BucketKey = 0, Similarity = 1.0f, Chunk = ByteString.Empty, Index = queryInfos[idx].query.Index, Duplicate = true, NeedToStore = true, TargetAgent = a };
+                }
+            }, context.CancellationToken));
+        }
+        await Task.WhenAll(tasks);
+
+        // Store any chunks that need storing
+        var storeTasks = new List<Task>();
+        for (int i = 0; i < results.Length; i++)
+        {
+            var r = results[i];
+            if (r == null) continue;
+            if (!r.NeedToStore) { response.Results.Add(r); continue; }
+
+            var idx = i;
+            storeTasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    var info = queryInfos[idx];
+                    var storeReq = new StoreVector_Req { TargetIp = r.TargetAgent, Bitstring = info.query.BucketString, HeadRouteID = "" };
+                    storeReq.Vector.AddRange(info.query.Vector);
+                    if (info.query.Chunk != null && info.query.Chunk.Length > 0)
+                        storeReq.Chunk = info.query.Chunk;
+                    else return;
+                    var storeRes = await Task.FromResult(Globals.svec.Store(storeReq));
+                    r.BucketId = storeRes.Id;
+                    r.BucketKey = storeRes.Index;
+                }
+                catch { /* Continue — chunk may already be stored */ }
+            }));
+            response.Results.Add(r);
+        }
+        if (storeTasks.Count > 0)
+            await Task.WhenAll(storeTasks);
+
         return response;
     }
 
@@ -380,209 +379,209 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         using var rootSpan = Observability.StartStage("SearchAllStream");
         try
         {
-            // OPTIMIZATION: Process queries in parallel instead of sequentially
-            // This is the critical fix - allows multiple queries to be processed concurrently
-            
-            // Create channel to buffer queries and results
-            var queryChannel = Channel.CreateUnbounded<QueryObject>();
-            var resultChannel = Channel.CreateUnbounded<(QueryResponseObject? result, int index)>();
-            
-            // Background task to read queries from stream
-            var readTask = Task.Run(async () =>
+            // ──────────────────────────────────────────────────────────────────
+            // PHASE 1: Ingest ALL queries from the stream into memory.
+            // Queries carry NO chunk bytes (two-phase mode), so this is fast.
+            // For a 3MB file ≈ 600 queries × ~540 bytes each ≈ 320KB total.
+            // ──────────────────────────────────────────────────────────────────
+            var ingestSw = Stopwatch.StartNew();
+            var allQueries = new List<QueryObject>();
+            await foreach (var queryObj in requestStream.ReadAllAsync(context.CancellationToken))
             {
-                var ingestSw = Stopwatch.StartNew();
-                try
-                {
-                    await foreach (var queryObj in requestStream.ReadAllAsync(context.CancellationToken))
-                    {
-                        await queryChannel.Writer.WriteAsync(queryObj, context.CancellationToken);
-                    }
-                    queryChannel.Writer.Complete();
-                }
-                catch (Exception ex)
-                {
-                    queryChannel.Writer.Complete(ex);
-                }
-                finally
-                {
-                    ingestSw.Stop();
-                    Observability.RecordStage("Ingress", ingestSw.Elapsed.TotalMilliseconds);
-                }
-            }, context.CancellationToken);
-            
-            // Process queries in parallel - NO ARTIFICIAL CAPS
-            // Let the system use as much concurrency as it can handle
-            // DYNAMIC: Adjust concurrency based on current CPU and memory usage only
-            int baseConcurrency = Environment.ProcessorCount * 4; // 4x for I/O-bound (network calls)
-            var dynamicConcurrency = DynamicResourceManager.GetOptimalConcurrency(
-                minConcurrency: Environment.ProcessorCount, // Start with all cores
-                maxConcurrency: int.MaxValue, // No artificial cap
-                baseConcurrency: baseConcurrency
-            );
-            var maxConcurrency = Math.Min(dynamicConcurrency, GetStreamMaxConcurrency());
-            var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-            var activeTasks = new List<Task>();
-            
-            // Start background task to process queries and stream results
-            var processTask = Task.Run(async () =>
+                allQueries.Add(queryObj);
+            }
+            ingestSw.Stop();
+            Observability.RecordStage("Ingress", ingestSw.Elapsed.TotalMilliseconds);
+
+            if (allQueries.Count == 0) return;
+
+            // ──────────────────────────────────────────────────────────────────
+            // PHASE 2: Group queries by target agent (rendezvous hash).
+            // Each group becomes ONE BatchGet gRPC call.
+            // With 5 agents: ~600 queries → 5 gRPC calls (instead of 600).
+            // ──────────────────────────────────────────────────────────────────
+            var routeSw = Stopwatch.StartNew();
+
+            // For each query: compute bitstring neighbors, route to agent
+            var queryInfos = new (QueryObject query, List<string> buckets, string agent)[allQueries.Count];
+
+            // Parallel routing — pure CPU, no I/O
+            Parallel.For(0, allQueries.Count, i =>
             {
-                try
+                var q = allQueries[i];
+                var buckets = GetNeighbouringBuckets(q.BucketString, q.Vector);
+                var agent = RouteToAgent(q.BucketString);
+                queryInfos[i] = (q, buckets, agent);
+            });
+
+            // Group by agent
+            var agentGroups = new Dictionary<string, List<int>>(); // agent -> list of query indices
+            for (int i = 0; i < queryInfos.Length; i++)
+            {
+                var agent = queryInfos[i].agent;
+                if (!agentGroups.TryGetValue(agent, out var list))
                 {
-                    // Process queries as they arrive
-                    await foreach (var queryObj in queryChannel.Reader.ReadAllAsync(context.CancellationToken))
+                    list = new List<int>();
+                    agentGroups[agent] = list;
+                }
+                list.Add(i);
+            }
+
+            routeSw.Stop();
+            Observability.RecordStage("Route", routeSw.Elapsed.TotalMilliseconds);
+
+            // ──────────────────────────────────────────────────────────────────
+            // PHASE 3: Fire ONE BatchGet per agent — in parallel.
+            // All results come back in one shot per agent.
+            // ──────────────────────────────────────────────────────────────────
+            var searchSw = Stopwatch.StartNew();
+
+            // Array to hold all results, indexed by original query position
+            var results = new QueryResponseObject[allQueries.Count];
+
+            var batchTasks = new List<Task>();
+            foreach (var (agent, queryIndices) in agentGroups)
+            {
+                var capturedAgent = agent;
+                var capturedIndices = queryIndices;
+
+                batchTasks.Add(Task.Run(async () =>
+                {
+                    try
                     {
-                        // Wait for semaphore slot
-                        await semaphore.WaitAsync(context.CancellationToken);
-                        
-                        // Process query in parallel
-                        var task = Task.Run(async () =>
+                        // Build the batch request
+                        var batchReq = new BatchSearchVector_Req();
+                        foreach (var idx in capturedIndices)
                         {
-                            var querySw = Stopwatch.StartNew();
-                            try
+                            var info = queryInfos[idx];
+                            var req = new SearchVector_Req
                             {
-                                using var querySpan = Observability.StartStage("ProcessQuery");
-                                querySpan?.SetTag("query.index", queryObj.Index);
-                                // Get neighboring buckets for this query (with optimal ordering based on LSH vector confidence)
-                                var routeSw = Stopwatch.StartNew();
-                                List<string> buckets = GetNeighbouringBuckets(queryObj.BucketString, queryObj.Vector);
-                                
-                                // Rendezvous routing: deterministic, zero-network-hop agent selection
-                                string targetAgent = RouteToAgent(queryObj.BucketString);
-                                routeSw.Stop();
-                                Observability.RecordStage("Route", routeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
-                                
-                                // Create search request
-                                SearchVector_Req req = new SearchVector_Req()
-                                {
-                                    Index = queryObj.Index,
-                                    MinimumSimilarity = Globals.MinThresh,
-                                    K = Globals.K
-                                };
-                                req.Vector.AddRange(queryObj.Vector);
-                                req.Bitstrings.AddRange(buckets);
-                                
-                                // Search in the DHT-determined agent (distributes load across all agents)
-                                var searchSw = Stopwatch.StartNew();
-                                SearchVector_Result res = await Globals.svs.ClientGet(req, targetAgent, "5000", context.CancellationToken);
-                                searchSw.Stop();
-                                Observability.RecordStage("SearchBuckets", searchSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
-                                
-                                QueryResponseObject responseObj;
-                                
-                                if (res.Save)
-                                {
-                                    // OPTIMIZATION: Don't store here - Cross will handle it in background
-                                    // Just return flags so Cross knows to store it
-                                    responseObj = new QueryResponseObject()
-                                    {
-                                        BucketId = 0, // Will be set by Cross after booking ID
-                                        BucketKey = 0,
-                                        Similarity = 1.0f,
-                                        Chunk = ByteString.Empty, // No chunk bytes needed
-                                        Index = queryObj.Index,
-                                        Duplicate = true, // Will be stored, so base == original
-                                        NeedToStore = true, // Flag: Cross needs to store this
-                                        TargetAgent = targetAgent // Which agent to store to
-                                    };
-                                }
-                                else
-                                {
-                                    // Find best matching result
-                                    Query query = new Query()
-                                    {
-                                        query = queryObj,
-                                        buckets = buckets
-                                    };
-                                    responseObj = SelectBestResult(res, query);
-                                    
-                                    // Only store if similarity < MinThresh (no good match found across all searched buckets)
-                                    if (responseObj.Similarity < Globals.MinThresh)
-                                    {
-                                        // OPTIMIZATION: Don't store here - Cross will handle it in background
-                                        // Just return flags so Cross knows to store it
-                                        responseObj.BucketId = 0; // Will be set by Cross after booking ID
-                                        responseObj.BucketKey = 0;
-                                        responseObj.Chunk = ByteString.Empty; // No chunk bytes needed
-                                        responseObj.Similarity = 1.0f;
-                                        responseObj.Duplicate = true; // Will be stored, so base == original
-                                        responseObj.NeedToStore = true; // Flag: Cross needs to store this
-                                        responseObj.TargetAgent = targetAgent; // Which agent to store to
-                                    }
-                                    else
-                                    {
-                                        // Similarity >= MinThresh, found near-duplicate - use it for deduplication, DON'T store new chunk
-                                    }
-                                }
+                                Index = info.query.Index,
+                                MinimumSimilarity = Globals.MinThresh,
+                                K = Globals.K
+                            };
+                            req.Vector.AddRange(info.query.Vector);
+                            req.Bitstrings.AddRange(info.buckets);
+                            batchReq.Queries.Add(req);
+                        }
 
-                                // Write result to channel (stream as ready)
-                                var serializeSw = Stopwatch.StartNew();
-                                await resultChannel.Writer.WriteAsync((responseObj, queryObj.Index), context.CancellationToken);
-                                serializeSw.Stop();
-                                Observability.RecordStage("Serialize", serializeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
-                            }
-                            catch (Exception)
-                            {
-                                // Two-phase mode: QueryObject intentionally carries no chunk bytes.
-                                // Never attempt emergency StoreVector from gateway in this path.
-                                string targetAgent = RouteToAgent(queryObj.BucketString);
+                        // ONE gRPC call for all queries to this agent
+                        var batchRes = await Globals.svs.ClientBatchGet(batchReq, capturedAgent, context.CancellationToken);
 
-                                var errorResponseObj = new QueryResponseObject()
-                                {
-                                    BucketId = 0,
-                                    BucketKey = 0,
-                                    Similarity = 1.0f,
-                                    Chunk = ByteString.Empty,
-                                    Index = queryObj.Index,
-                                    Duplicate = true,
-                                    NeedToStore = true,
-                                    TargetAgent = targetAgent
-                                };
-                                await resultChannel.Writer.WriteAsync((errorResponseObj, queryObj.Index), context.CancellationToken);
-                            }
-                            finally
-                            {
-                                querySw.Stop();
-                                Observability.RecordStage("Egress", querySw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
-                                semaphore.Release();
-                            }
-                        }, context.CancellationToken);
-                        
-                        activeTasks.Add(task);
+                        // Map results back to original query positions
+                        for (int j = 0; j < capturedIndices.Count && j < batchRes.Results.Count; j++)
+                        {
+                            var idx = capturedIndices[j];
+                            var res = batchRes.Results[j];
+                            var info = queryInfos[idx];
+
+                            results[idx] = BuildResponseObj(res, info.query, info.buckets, capturedAgent);
+                        }
                     }
-                    
-                    // Wait for all processing tasks to complete
-                    await Task.WhenAll(activeTasks);
-                    
-                    // Close result channel writer
-                    resultChannel.Writer.Complete();
-                }
-                catch (Exception ex)
-                {
-                    resultChannel.Writer.Complete(ex);
-                }
-            }, context.CancellationToken);
-            
-            // Stream results as they complete (order doesn't matter - Cross collects by index)
-            await foreach (var (result, index) in resultChannel.Reader.ReadAllAsync(context.CancellationToken))
+                    catch (Exception)
+                    {
+                        // On batch failure: mark all queries in this group as need-to-store
+                        foreach (var idx in capturedIndices)
+                        {
+                            results[idx] = new QueryResponseObject
+                            {
+                                BucketId = 0,
+                                BucketKey = 0,
+                                Similarity = 1.0f,
+                                Chunk = ByteString.Empty,
+                                Index = queryInfos[idx].query.Index,
+                                Duplicate = true,
+                                NeedToStore = true,
+                                TargetAgent = capturedAgent
+                            };
+                        }
+                    }
+                }, context.CancellationToken));
+            }
+
+            await Task.WhenAll(batchTasks);
+            searchSw.Stop();
+            Observability.RecordStage("SearchBuckets", searchSw.Elapsed.TotalMilliseconds);
+
+            // ──────────────────────────────────────────────────────────────────
+            // PHASE 4: Stream all results back to Cross.
+            // Order doesn't matter — Cross collects by index.
+            // ──────────────────────────────────────────────────────────────────
+            var egressSw = Stopwatch.StartNew();
+            for (int i = 0; i < results.Length; i++)
             {
-                if (result != null)
+                var r = results[i];
+                if (r != null)
                 {
-                    await responseStream.WriteAsync(result);
+                    await responseStream.WriteAsync(r);
+                }
+                else
+                {
+                    // Safety: if somehow a result slot was missed
+                    await responseStream.WriteAsync(new QueryResponseObject
+                    {
+                        BucketId = 0,
+                        BucketKey = 0,
+                        Similarity = 1.0f,
+                        Chunk = ByteString.Empty,
+                        Index = allQueries[i].Index,
+                        Duplicate = true,
+                        NeedToStore = true,
+                        TargetAgent = queryInfos[i].agent
+                    });
                 }
             }
-            
-            // Wait for all tasks to complete
-            await Task.WhenAll(readTask, processTask);
+            egressSw.Stop();
+            Observability.RecordStage("Egress", egressSw.Elapsed.TotalMilliseconds);
         }
         catch (OperationCanceledException)
         {
-            // Client cancelled - this is normal, just exit
+            // Client cancelled - normal
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[SearchAllStream] Fatal error: {ex.Message}");
             throw;
         }
+    }
+
+    /// <summary>
+    /// Convert an agent's SearchVector_Result into a QueryResponseObject.
+    /// Handles both "save needed" and "match found" cases.
+    /// </summary>
+    private QueryResponseObject BuildResponseObj(SearchVector_Result res, QueryObject queryObj, List<string> buckets, string targetAgent)
+    {
+        if (res.Save)
+        {
+            return new QueryResponseObject
+            {
+                BucketId = 0,
+                BucketKey = 0,
+                Similarity = 1.0f,
+                Chunk = ByteString.Empty,
+                Index = queryObj.Index,
+                Duplicate = true,
+                NeedToStore = true,
+                TargetAgent = targetAgent
+            };
+        }
+
+        var query = new Query { query = queryObj, buckets = buckets };
+        var responseObj = SelectBestResult(res, query);
+
+        if (responseObj.Similarity < Globals.MinThresh)
+        {
+            // Below threshold — needs storing
+            responseObj.BucketId = 0;
+            responseObj.BucketKey = 0;
+            responseObj.Chunk = ByteString.Empty;
+            responseObj.Similarity = 1.0f;
+            responseObj.Duplicate = true;
+            responseObj.NeedToStore = true;
+            responseObj.TargetAgent = targetAgent;
+        }
+
+        return responseObj;
     }
     
 /*     public override async Task<QueryResponse> SearchAll(QueryRequest request, ServerCallContext context)
