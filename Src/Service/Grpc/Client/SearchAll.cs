@@ -261,27 +261,45 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         var best = incoming.Results[0];
         float bestSim = best.Similarity;
         int bestIndex = 0;
+        bool hasQueryChunk = query.query.Chunk != null && query.query.Chunk.Length > 0;
 
         if (incoming.Results.Count > 1)
         {
-            // Multiple results — byte-level comparison to pick the true best
-            int bestByteSim = 0;
-            for (int i = 0; i < incoming.Results.Count; i++)
+            if (hasQueryChunk)
             {
-                var r = incoming.Results[i];
-                if (r.Chunk == null || r.Chunk.Length == 0) continue;
-                (int[] _, int eqCount) = SubtractAVX2(query.query.Chunk.ToArray(), r.Chunk.ToArray());
-                if (eqCount > bestByteSim)
+                // Multiple results — byte-level comparison to pick the true best
+                int bestByteSim = 0;
+                for (int i = 0; i < incoming.Results.Count; i++)
                 {
-                    bestByteSim = eqCount;
-                    bestIndex = i;
+                    var r = incoming.Results[i];
+                    if (r.Chunk == null || r.Chunk.Length == 0) continue;
+                    if (r.Chunk.Length != query.query.Chunk.Length) continue;
+                    (int[] _, int eqCount) = SubtractAVX2(query.query.Chunk.ToArray(), r.Chunk.ToArray());
+                    if (eqCount > bestByteSim)
+                    {
+                        bestByteSim = eqCount;
+                        bestIndex = i;
+                    }
+                }
+                best = incoming.Results[bestIndex];
+                if (bestByteSim > 0 && best.Chunk.Length > 0)
+                    bestSim = (float)bestByteSim / best.Chunk.Length;
+            }
+            else
+            {
+                // Two-phase mode: no query chunk bytes available.
+                // Use cosine similarity only and pick max.
+                for (int i = 1; i < incoming.Results.Count; i++)
+                {
+                    if (incoming.Results[i].Similarity > bestSim)
+                    {
+                        best = incoming.Results[i];
+                        bestSim = best.Similarity;
+                    }
                 }
             }
-            best = incoming.Results[bestIndex];
-            if (bestByteSim > 0 && best.Chunk.Length > 0)
-                bestSim = (float)bestByteSim / best.Chunk.Length;
         }
-        else if (best.Chunk != null && best.Chunk.Length > 0)
+        else if (hasQueryChunk && best.Chunk != null && best.Chunk.Length > 0 && best.Chunk.Length == query.query.Chunk.Length)
         {
             // Single result with chunk bytes — compute exact byte-level similarity
             (int[] _, int eqCount) = SubtractAVX2(query.query.Chunk.ToArray(), best.Chunk.ToArray());
@@ -403,6 +421,10 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     HeadRouteID = ""
                 };
                 storeReq.Vector.AddRange(queries[item.Item2].query.Vector);
+                if (item.Item1.Chunk == null || item.Item1.Chunk.Length == 0)
+                {
+                    continue;
+                }
                 storeReq.Chunk = item.Item1.Chunk;
                 
                 var storeRes = Globals.svec.Store(storeReq);
@@ -581,16 +603,13 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                 serializeSw.Stop();
                                 Observability.RecordStage("Serialize", serializeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
                             }
-                            catch (Exception ex)
+                            catch (Exception)
                             {
-                                // Error processing query — attempt emergency store
-                                // When search fails, try to store the chunk and use the stored reference.
-                                // This prevents the Cross encoder from falling back to raw-embed unnecessarily.
-                                ulong storedBucketId = 0;
-                                ulong storedBucketKey = 0;
+                                // Two-phase mode: QueryObject intentionally carries no chunk bytes.
+                                // Never attempt emergency StoreVector from gateway in this path.
+                                string targetAgent;
                                 try
                                 {
-                                    string targetAgent;
                                     if (LocalModeDetector.IsLocalMode())
                                     {
                                         targetAgent = SelectAgentForBucket(queryObj.BucketString);
@@ -598,45 +617,28 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                     else
                                     {
                                         targetAgent = await Globals.dhtService.FindResponsibleAgentAsync(
-                                            queryObj.BucketString, 
-                                            Globals.AgentsLoadbalancer, 
+                                            queryObj.BucketString,
+                                            Globals.AgentsLoadbalancer,
                                             context.CancellationToken
                                         );
                                     }
-                                    
-                                    StoreVector_Req storeReq = new StoreVector_Req
-                                    {
-                                        TargetIp = targetAgent,
-                                        Bitstring = queryObj.BucketString,
-                                        HeadRouteID = ""
-                                    };
-                                    storeReq.Vector.AddRange(queryObj.Vector);
-                                    storeReq.Chunk = queryObj.Chunk;
-                                    
-                                    var callOptions = new CallOptions(
-                                        deadline: DateTime.UtcNow.AddSeconds(10),
-                                        cancellationToken: context.CancellationToken
-                                    );
-                                    var storeRes = Globals.svec.Store(storeReq, callOptions);
-                                    storedBucketId = storeRes.Id;
-                                    storedBucketKey = storeRes.Index;
-                                    // Emergency store succeeded
                                 }
-                                catch (Exception storeEx)
+                                catch
                                 {
-                                    // Emergency store also failed
+                                    // Keep pipeline alive; Cross will retry/route storage with real chunk bytes.
+                                    targetAgent = Globals.AgentsLoadbalancer;
                                 }
-                                
-                                // Return response with stored reference (if store succeeded) or 0,0 (raw-embed fallback).
-                                // Either way, Chunk = original data so Cross encoder can use it.
+
                                 var errorResponseObj = new QueryResponseObject()
                                 {
-                                    BucketId = storedBucketId,
-                                    BucketKey = storedBucketKey,
-                                    Similarity = storedBucketId > 0 ? 1.0f : 0f,
-                                    Chunk = queryObj.Chunk,
+                                    BucketId = 0,
+                                    BucketKey = 0,
+                                    Similarity = 1.0f,
+                                    Chunk = ByteString.Empty,
                                     Index = queryObj.Index,
-                                    Duplicate = storedBucketId > 0 // base == original when store succeeded
+                                    Duplicate = true,
+                                    NeedToStore = true,
+                                    TargetAgent = targetAgent
                                 };
                                 await resultChannel.Writer.WriteAsync((errorResponseObj, queryObj.Index), context.CancellationToken);
                             }
