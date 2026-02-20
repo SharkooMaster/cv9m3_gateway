@@ -31,52 +31,13 @@ public class Query
 
 public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 {
-    private static readonly object _agentResolveLock = new object();
-    private static DateTime _agentResolveAt = DateTime.MinValue;
-    private static string[] _resolvedAgents = Array.Empty<string>();
-    private static int _roundRobinCounter = -1;
-
-    // Local-mode forced spread for benchmarking:
-    // strict round-robin over resolved agent pod IPs.
-    private static string SelectAgentForBucket(string _bucketKey)
+    // ── Rendezvous routing: deterministic, zero-network-hop agent selection ──
+    // Replaces both round-robin (local mode) and DHT (distributed mode).
+    // Same (bucket, agent set) always maps to the same agent.
+    // Adding/removing an agent only remaps ~1/N of buckets.
+    private static string RouteToAgent(string bucketString)
     {
-        if (!LocalModeDetector.IsLocalMode())
-        {
-            return Globals.AgentsLoadbalancer;
-        }
-
-        var now = DateTime.UtcNow;
-        lock (_agentResolveLock)
-        {
-            if (_resolvedAgents.Length == 0 || now - _agentResolveAt > TimeSpan.FromSeconds(15))
-            {
-                try
-                {
-                    _resolvedAgents = Dns.GetHostAddresses(Globals.AgentsLoadbalancer)
-                        .Where(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                        .Select(ip => ip.ToString())
-                        .Distinct()
-                        .ToArray();
-                    _agentResolveAt = now;
-                    Console.WriteLine($"[SearchAll] Resolved {Globals.AgentsLoadbalancer} => [{string.Join(", ", _resolvedAgents)}]");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[SearchAll] DNS resolve failed for {Globals.AgentsLoadbalancer}: {ex.Message}");
-                    // Keep the previous resolved list if we already have one;
-                    // transient DNS failures should not collapse routing back to a single service target.
-                    _agentResolveAt = now;
-                }
-            }
-        }
-
-        if (_resolvedAgents.Length == 0)
-        {
-            return Globals.AgentsLoadbalancer;
-        }
-
-        int idx = Math.Abs(Interlocked.Increment(ref _roundRobinCounter)) % _resolvedAgents.Length;
-        return _resolvedAgents[idx];
+        return RendezvousRouter.PickAgent(bucketString);
     }
 
     private static int GetStreamMaxConcurrency()
@@ -340,22 +301,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = -1 }; // -1 = unlimited
         await Parallel.ForAsync(0, queries.Count, options, async (i, ct) =>
         {
-            // LOCAL MODE: Skip DHT routing, go directly to agent-1
-            // DISTRIBUTED MODE: Use DHT to find responsible agent
-            string targetAgent;
-            if (LocalModeDetector.IsLocalMode())
-            {
-                targetAgent = SelectAgentForBucket(queries[i].query.BucketString);
-            }
-            else
-            {
-                // DHT-AWARE ROUTING: Find the agent responsible for the primary bucket
-                targetAgent = await Globals.dhtService.FindResponsibleAgentAsync(
-                    queries[i].query.BucketString, 
-                    Globals.AgentsLoadbalancer, 
-                    ct
-                );
-            }
+            string targetAgent = RouteToAgent(queries[i].query.BucketString);
             
             SearchVector_Req req = new SearchVector_Req()
             {
@@ -398,21 +344,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         {
             try
             {
-                // LOCAL MODE: Skip DHT routing, go directly to agent-1
-                // DISTRIBUTED MODE: Use DHT to find responsible agent
-                string targetAgent;
-                if (LocalModeDetector.IsLocalMode())
-                {
-                    targetAgent = SelectAgentForBucket(queries[item.Item2].query.BucketString);
-                }
-                else
-                {
-                    // Find the DHT-determined agent for this bucket
-                    targetAgent = await Globals.dhtService.FindResponsibleAgentAsync(
-                        queries[item.Item2].query.BucketString, 
-                        Globals.AgentsLoadbalancer
-                    );
-                }
+                string targetAgent = RouteToAgent(queries[item.Item2].query.BucketString);
                 
                 StoreVector_Req storeReq = new StoreVector_Req
                 {
@@ -514,23 +446,8 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                                 var routeSw = Stopwatch.StartNew();
                                 List<string> buckets = GetNeighbouringBuckets(queryObj.BucketString, queryObj.Vector);
                                 
-                                // LOCAL MODE: Skip DHT routing, go directly to agent-1
-                                // DISTRIBUTED MODE: Use DHT to find responsible agent
-                                string targetAgent;
-                                if (LocalModeDetector.IsLocalMode())
-                                {
-                                    targetAgent = SelectAgentForBucket(queryObj.BucketString);
-                                }
-                                else
-                                {
-                                    // DHT-AWARE ROUTING: Find the agent responsible for the primary bucket
-                                    // This distributes load across all agents instead of bottlenecking on agent-1
-                                    targetAgent = await Globals.dhtService.FindResponsibleAgentAsync(
-                                        queryObj.BucketString, 
-                                        Globals.AgentsLoadbalancer, 
-                                        context.CancellationToken
-                                    );
-                                }
+                                // Rendezvous routing: deterministic, zero-network-hop agent selection
+                                string targetAgent = RouteToAgent(queryObj.BucketString);
                                 routeSw.Stop();
                                 Observability.RecordStage("Route", routeSw.Elapsed.TotalMilliseconds, ("query_index", queryObj.Index));
                                 
@@ -607,27 +524,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                             {
                                 // Two-phase mode: QueryObject intentionally carries no chunk bytes.
                                 // Never attempt emergency StoreVector from gateway in this path.
-                                string targetAgent;
-                                try
-                                {
-                                    if (LocalModeDetector.IsLocalMode())
-                                    {
-                                        targetAgent = SelectAgentForBucket(queryObj.BucketString);
-                                    }
-                                    else
-                                    {
-                                        targetAgent = await Globals.dhtService.FindResponsibleAgentAsync(
-                                            queryObj.BucketString,
-                                            Globals.AgentsLoadbalancer,
-                                            context.CancellationToken
-                                        );
-                                    }
-                                }
-                                catch
-                                {
-                                    // Keep pipeline alive; Cross will retry/route storage with real chunk bytes.
-                                    targetAgent = Globals.AgentsLoadbalancer;
-                                }
+                                string targetAgent = RouteToAgent(queryObj.BucketString);
 
                                 var errorResponseObj = new QueryResponseObject()
                                 {
