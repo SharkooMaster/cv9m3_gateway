@@ -569,6 +569,10 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         var query = new Query { query = queryObj, buckets = buckets };
         var responseObj = SelectBestResult(res, query);
 
+        // ALWAYS set TargetAgent so Cross knows which agent to fetch base chunks from
+        // during diff encoding (lazy fetch) and decompression.
+        responseObj.TargetAgent = targetAgent;
+
         if (responseObj.Similarity < Globals.MinThresh)
         {
             // Below threshold — needs storing
@@ -578,7 +582,6 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
             responseObj.Similarity = 1.0f;
             responseObj.Duplicate = true;
             responseObj.NeedToStore = true;
-            responseObj.TargetAgent = targetAgent;
         }
 
         return responseObj;
