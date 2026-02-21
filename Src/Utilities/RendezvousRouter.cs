@@ -1,90 +1,168 @@
 using System.Net;
 using System.Text;
+using Google.Protobuf.WellKnownTypes;
+
 namespace Gateway.Utils;
 
 /// <summary>
-/// Rendezvous (Highest Random Weight) hashing for deterministic bucket-to-agent routing.
-/// For N agents, only ~1/N of buckets remap when a node joins/leaves.
-/// Zero network overhead — every node can compute the answer independently.
+/// Rendezvous (Highest Random Weight) hashing — uses STABLE Kubernetes node names
+/// for the hash key, NOT ephemeral pod IPs.
+///
+/// Node names (spec.nodeName) never change across pod restarts / helm upgrades.
+/// Same node → same data (hostPath) → same routing → no corruption.
 /// </summary>
 public static class RendezvousRouter
 {
     private static readonly object _lock = new();
-    private static string[] _agents = Array.Empty<string>();
+
+    // ── Stable routing data ──
+    private static string[] _nodeNames = Array.Empty<string>();
+    private static byte[][] _nodeNameBytes = Array.Empty<byte[]>();
+    private static string[] _nodeIps = Array.Empty<string>();
     private static DateTime _resolvedAt = DateTime.MinValue;
 
     /// <summary>
     /// Pick the owning agent for a bucket using rendezvous hashing.
-    /// Deterministic: same (bucket, agent set) always returns the same agent.
-    /// O(N) where N = agent count. For 5-20 agents this is ~nanoseconds.
+    /// Deterministic: same (bucket, node set) always returns the same agent IP.
     /// </summary>
     public static string PickAgent(string bucketString)
     {
-        var agents = GetAgents();
-        if (agents.Length == 0) return Gateway.Utils.Globals.Globals.AgentsLoadbalancer;
-        if (agents.Length == 1) return agents[0];
+        var nodeNames = _nodeNames;
+        var nodeIps = _nodeIps;
 
-        string bestAgent = agents[0];
-        uint bestHash = 0;
-        for (int i = 0; i < agents.Length; i++)
+        if (nodeNames.Length == 0)
         {
-            uint hash = MurmurHash3($"{bucketString}|{agents[i]}");
+            GetAgents();
+            nodeNames = _nodeNames;
+            nodeIps = _nodeIps;
+            if (nodeNames.Length == 0) return Gateway.Utils.Globals.Globals.AgentsLoadbalancer;
+        }
+        if (nodeNames.Length == 1) return nodeIps[0];
+
+        var nodeNameBytesLocal = _nodeNameBytes;
+
+        int bucketLen = bucketString.Length;
+        Span<byte> buf = stackalloc byte[160];
+
+        for (int c = 0; c < bucketLen; c++)
+            buf[c] = (byte)bucketString[c];
+        buf[bucketLen] = (byte)'|';
+
+        string bestIp = nodeIps[0];
+        uint bestHash = 0;
+
+        for (int i = 0; i < nodeNames.Length; i++)
+        {
+            var nb = nodeNameBytesLocal[i];
+            nb.AsSpan().CopyTo(buf.Slice(bucketLen + 1));
+            int totalLen = bucketLen + 1 + nb.Length;
+
+            uint hash = MurmurHash3(buf.Slice(0, totalLen));
             if (hash > bestHash)
             {
                 bestHash = hash;
-                bestAgent = agents[i];
+                bestIp = nodeIps[i];
             }
         }
-        return bestAgent;
+        return bestIp;
     }
 
     /// <summary>
-    /// Get the current set of known agent IPs. Resolves from DNS headless service, cached 15s.
-    /// Sorted for deterministic ordering across all gateway instances.
+    /// Resolve agents: DNS → pod IPs → GetNodeInfo gRPC → node names.
+    /// Cached 15s.
     /// </summary>
     public static string[] GetAgents()
     {
         lock (_lock)
         {
-            if (_agents.Length > 0 && DateTime.UtcNow - _resolvedAt < TimeSpan.FromSeconds(15))
-                return _agents;
+            if (_nodeNames.Length > 0 && DateTime.UtcNow - _resolvedAt < TimeSpan.FromSeconds(15))
+                return _nodeIps;
         }
 
         try
         {
-            var resolved = Dns.GetHostAddresses(Gateway.Utils.Globals.Globals.AgentsLoadbalancer)
+            var podIps = Dns.GetHostAddresses(Gateway.Utils.Globals.Globals.AgentsLoadbalancer)
                 .Where(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
                 .Select(ip => ip.ToString())
                 .Distinct()
-                .OrderBy(x => x) // Stable order across all callers
+                .OrderBy(x => x)
                 .ToArray();
 
-            if (resolved.Length > 0)
+            if (podIps.Length == 0)
             {
-                lock (_lock)
+                lock (_lock) { return _nodeIps.Length > 0 ? _nodeIps : new[] { Gateway.Utils.Globals.Globals.AgentsLoadbalancer }; }
+            }
+
+            var entries = new List<(string nodeName, string podIp)>(podIps.Length);
+            var tasks = podIps.Select(async ip =>
+            {
+                try
                 {
-                    _agents = resolved;
-                    _resolvedAt = DateTime.UtcNow;
+                    var client = GrpcChannelFactory.GetClient(
+                        target: ip,
+                        ctor: chan => new GetNodeInfo.GetNodeInfoClient(chan),
+                        roundRobin: false,
+                        port: 5000);
+
+                    var res = await client.GetAsync(
+                        new Empty(),
+                        deadline: DateTime.UtcNow.AddSeconds(3));
+
+                    string nodeName = res.NodeName;
+                    if (string.IsNullOrWhiteSpace(nodeName))
+                        nodeName = ip;
+
+                    return (nodeName, ip);
+                }
+                catch
+                {
+                    return (ip, ip);
+                }
+            }).ToArray();
+
+            Task.WaitAll(tasks);
+            foreach (var t in tasks)
+                entries.Add(t.Result);
+
+            entries.Sort((a, b) => string.Compare(a.nodeName, b.nodeName, StringComparison.Ordinal));
+
+            var newNodeNames = entries.Select(e => e.nodeName).ToArray();
+            var newNodeIps = entries.Select(e => e.podIp).ToArray();
+            var newNodeNameBytes = newNodeNames.Select(n => Encoding.UTF8.GetBytes(n)).ToArray();
+
+            lock (_lock)
+            {
+                bool changed = !newNodeNames.SequenceEqual(_nodeNames) || !newNodeIps.SequenceEqual(_nodeIps);
+                _nodeNameBytes = newNodeNameBytes;
+                _nodeNames = newNodeNames;
+                _nodeIps = newNodeIps;
+                _resolvedAt = DateTime.UtcNow;
+
+                if (changed)
+                {
+                    var pairs = entries.Select(e => e.nodeName == e.podIp
+                        ? e.podIp
+                        : $"{e.nodeName}={e.podIp}");
+                    Console.WriteLine($"[RendezvousRouter] Resolved {entries.Count} agents: [{string.Join(", ", pairs)}]");
                 }
             }
         }
         catch
         {
-            // Keep previous resolution on DNS failure — transient failures shouldn't collapse routing
+            // Keep previous resolution on failure
         }
 
         lock (_lock)
         {
-            return _agents.Length > 0 ? _agents : new[] { Gateway.Utils.Globals.Globals.AgentsLoadbalancer };
+            return _nodeIps.Length > 0 ? _nodeIps : new[] { Gateway.Utils.Globals.Globals.AgentsLoadbalancer };
         }
     }
 
     /// <summary>
-    /// MurmurHash3 32-bit — fast, well-distributed, deterministic.
+    /// MurmurHash3 32-bit — Span overload, zero allocation.
     /// </summary>
-    private static uint MurmurHash3(string key)
+    private static uint MurmurHash3(ReadOnlySpan<byte> bytes)
     {
-        var bytes = Encoding.UTF8.GetBytes(key);
         const uint seed = 0x9747b28c;
         const uint c1 = 0xcc9e2d51;
         const uint c2 = 0x1b873593;
@@ -95,7 +173,7 @@ public static class RendezvousRouter
 
         for (int i = 0; i < nblocks; i++)
         {
-            uint k = BitConverter.ToUInt32(bytes, i * 4);
+            uint k = BitConverter.ToUInt32(bytes.Slice(i * 4, 4));
             k *= c1;
             k = RotateLeft(k, 15);
             k *= c2;

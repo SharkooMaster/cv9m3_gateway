@@ -43,6 +43,7 @@
     <Protobuf Include="Protos\SearchAll.proto" GrpcServices="Server" />
     <Protobuf Include="Protos\SearchVector.proto" GrpcServices="Client" />
     <Protobuf Include="Protos\StoreVector.proto" GrpcServices="Client" />
+    <Protobuf Include="Protos\GetNodeInfo.proto" GrpcServices="Client" />
   </ItemGroup>
 
   <PropertyGroup>
