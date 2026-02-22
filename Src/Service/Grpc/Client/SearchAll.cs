@@ -274,6 +274,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         ret.Index = best.Index;
         ret.Similarity = bestSim;
         ret.Duplicate = bestSim >= Globals.MinThresh;
+        ret.StorageGuid = best.StorageGuid ?? "";
 
         return ret;
     }
@@ -360,6 +361,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     var storeRes = await Task.FromResult(Globals.svec.Store(storeReq));
                     r.BucketId = storeRes.Id;
                     r.BucketKey = storeRes.Index;
+                    r.StorageGuid = storeRes.StorageGuid ?? "";
                 }
                 catch { /* Continue — chunk may already be stored */ }
             }));
