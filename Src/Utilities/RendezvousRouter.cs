@@ -1,93 +1,164 @@
 using System.Net;
 using System.Text;
+using Google.Protobuf.WellKnownTypes;
 
 namespace Gateway.Utils;
 
 /// <summary>
 /// Rendezvous (Highest Random Weight) hashing.
-/// Hash by sorted agent IPs from DNS. Consistent across all pods.
+/// Hashes by STABLE NODE NAMES (not pod IPs).
+/// Pod IPs change on restart → routing breaks.
+/// Node names are immutable → routing is stable across pod restarts.
 /// </summary>
 public static class RendezvousRouter
 {
     private static readonly object _lock = new();
-    private static string[] _agents = Array.Empty<string>();
-    private static byte[][] _agentBytes = Array.Empty<byte[]>();
-    private static DateTime _resolvedAt = DateTime.MinValue;
+
+    // ── Stable routing identity (node names don't change across pod restarts) ──
+    private static volatile string[] _nodeNames = Array.Empty<string>();
+    private static volatile byte[][] _nodeNameBytes = Array.Empty<byte[]>();
+
+    // ── Connection mapping (pod IPs may change, this gets refreshed) ──
+    private static volatile Dictionary<string, string> _nodeToIp = new();
+
+    // ── All current pod IPs ──
+    private static volatile string[] _agentIps = Array.Empty<string>();
+
+    private static long _resolvedAtTicks = 0;
 
     public static string PickAgent(string bucketString)
     {
-        var agents = _agents;
-        if (agents.Length == 0)
+        var nodeNames = _nodeNames;
+        if (nodeNames.Length == 0)
         {
             GetAgents();
-            agents = _agents;
-            if (agents.Length == 0) return Gateway.Utils.Globals.Globals.AgentsLoadbalancer;
+            nodeNames = _nodeNames;
+            if (nodeNames.Length == 0) return Gateway.Utils.Globals.Globals.AgentsLoadbalancer;
         }
-        if (agents.Length == 1) return agents[0];
+        if (nodeNames.Length == 1)
+        {
+            var mapping = _nodeToIp;
+            return mapping.TryGetValue(nodeNames[0], out var singleIp) ? singleIp : Gateway.Utils.Globals.Globals.AgentsLoadbalancer;
+        }
 
-        var agentBytesLocal = _agentBytes;
+        var nodeNameBytesLocal = _nodeNameBytes;
         int bucketLen = bucketString.Length;
-        Span<byte> buf = stackalloc byte[128];
+        Span<byte> buf = stackalloc byte[192];
 
         for (int c = 0; c < bucketLen; c++)
             buf[c] = (byte)bucketString[c];
         buf[bucketLen] = (byte)'|';
 
-        string bestAgent = agents[0];
+        string bestNode = nodeNames[0];
         uint bestHash = 0;
 
-        for (int i = 0; i < agents.Length; i++)
+        for (int i = 0; i < nodeNames.Length; i++)
         {
-            var ab = agentBytesLocal[i];
-            ab.AsSpan().CopyTo(buf.Slice(bucketLen + 1));
-            int totalLen = bucketLen + 1 + ab.Length;
+            var nb = nodeNameBytesLocal[i];
+            nb.AsSpan().CopyTo(buf.Slice(bucketLen + 1));
+            int totalLen = bucketLen + 1 + nb.Length;
 
             uint hash = MurmurHash3(buf.Slice(0, totalLen));
             if (hash > bestHash)
             {
                 bestHash = hash;
-                bestAgent = agents[i];
+                bestNode = nodeNames[i];
             }
         }
-        return bestAgent;
+
+        var nodeMapping = _nodeToIp;
+        return nodeMapping.TryGetValue(bestNode, out var agentIp) ? agentIp : Gateway.Utils.Globals.Globals.AgentsLoadbalancer;
     }
 
     public static string[] GetAgents()
     {
+        long resolvedTicks = Interlocked.Read(ref _resolvedAtTicks);
+        if (_nodeNames.Length > 0 && (DateTime.UtcNow.Ticks - resolvedTicks) < TimeSpan.FromSeconds(15).Ticks)
+            return _agentIps;
+
         lock (_lock)
         {
-            if (_agents.Length > 0 && DateTime.UtcNow - _resolvedAt < TimeSpan.FromSeconds(60))
-                return _agents;
-        }
+            if (_nodeNames.Length > 0 && (DateTime.UtcNow.Ticks - _resolvedAtTicks) < TimeSpan.FromSeconds(15).Ticks)
+                return _agentIps;
 
-        try
-        {
-            var resolved = Dns.GetHostAddresses(Gateway.Utils.Globals.Globals.AgentsLoadbalancer)
-                .Where(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                .Select(ip => ip.ToString())
-                .Distinct()
-                .OrderBy(x => x, StringComparer.Ordinal)
-                .ToArray();
-
-            if (resolved.Length > 0)
+            try
             {
-                lock (_lock)
-                {
-                    bool changed = !resolved.SequenceEqual(_agents);
-                    _agentBytes = resolved.Select(a => Encoding.UTF8.GetBytes(a)).ToArray();
-                    _agents = resolved;
-                    _resolvedAt = DateTime.UtcNow;
+                var resolvedIps = Dns.GetHostAddresses(Gateway.Utils.Globals.Globals.AgentsLoadbalancer)
+                    .Where(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    .Select(ip => ip.ToString())
+                    .Distinct()
+                    .ToArray();
 
-                    if (changed)
-                        Console.WriteLine($"[RendezvousRouter] Resolved {resolved.Length} agents: [{string.Join(", ", resolved)}]");
+                if (resolvedIps.Length == 0)
+                    return _agentIps.Length > 0 ? _agentIps : new[] { Gateway.Utils.Globals.Globals.AgentsLoadbalancer };
+
+                var newNodeToIp = new Dictionary<string, string>();
+                var tasks = resolvedIps.Select(async ip =>
+                {
+                    try
+                    {
+                        var client = GrpcChannelFactory.GetClient(
+                            target: ip,
+                            ctor: chan => new GetNodeInfo.GetNodeInfoClient(chan),
+                            roundRobin: false,
+                            port: 5000);
+
+                        var res = await client.GetAsync(new Empty(),
+                            deadline: DateTime.UtcNow.AddSeconds(3));
+
+                        string nodeName = res.NodeName;
+                        if (!string.IsNullOrWhiteSpace(nodeName))
+                            return (nodeName, ip, ok: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[RendezvousRouter] GetNodeInfo failed for {ip}: {ex.Message}");
+                    }
+                    return (nodeName: "", ip, ok: false);
+                }).ToArray();
+
+                Task.WaitAll(tasks, TimeSpan.FromSeconds(5));
+
+                foreach (var t in tasks)
+                {
+                    if (t.IsCompletedSuccessfully && t.Result.ok)
+                        newNodeToIp[t.Result.nodeName] = t.Result.ip;
+                }
+
+                if (newNodeToIp.Count == 0)
+                {
+                    // Fallback to IP-based routing (agents might not have GetNodeInfo yet)
+                    Console.WriteLine($"[RendezvousRouter] WARNING: GetNodeInfo failed for all agents. Falling back to IP-based routing.");
+                    var sortedIps = resolvedIps.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+                    _nodeNames = sortedIps;
+                    _nodeNameBytes = sortedIps.Select(a => Encoding.UTF8.GetBytes(a)).ToArray();
+                    _nodeToIp = sortedIps.ToDictionary(ip => ip, ip => ip);
+                    _agentIps = sortedIps;
+                    Interlocked.Exchange(ref _resolvedAtTicks, DateTime.UtcNow.Ticks);
+                    return _agentIps;
+                }
+
+                var sortedNodeNames = newNodeToIp.Keys.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+                bool changed = !sortedNodeNames.SequenceEqual(_nodeNames);
+
+                _nodeNameBytes = sortedNodeNames.Select(n => Encoding.UTF8.GetBytes(n)).ToArray();
+                _nodeNames = sortedNodeNames;
+                _nodeToIp = newNodeToIp;
+                _agentIps = newNodeToIp.Values.ToArray();
+                Interlocked.Exchange(ref _resolvedAtTicks, DateTime.UtcNow.Ticks);
+
+                if (changed)
+                {
+                    var info = string.Join(", ", sortedNodeNames.Select(n => $"{n}={newNodeToIp[n]}"));
+                    Console.WriteLine($"[RendezvousRouter] Resolved {sortedNodeNames.Length} agents by node name: [{info}]");
                 }
             }
-        }
-        catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[RendezvousRouter] DNS resolve failed: {ex.Message}");
+            }
 
-        lock (_lock)
-        {
-            return _agents.Length > 0 ? _agents : new[] { Gateway.Utils.Globals.Globals.AgentsLoadbalancer };
+            return _agentIps.Length > 0 ? _agentIps : new[] { Gateway.Utils.Globals.Globals.AgentsLoadbalancer };
         }
     }
 
