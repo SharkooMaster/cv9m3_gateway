@@ -135,6 +135,18 @@ if (LocalModeDetector.IsLocalMode())
     }
 }
 
+// ── Global exception handlers to prevent silent crashes ──
+AppDomain.CurrentDomain.UnhandledException += (sender, eventArgs) =>
+{
+    Console.WriteLine($"[GATEWAY UNHANDLED EXCEPTION]: {eventArgs.ExceptionObject}");
+};
+
+TaskScheduler.UnobservedTaskException += (sender, e) =>
+{
+    Console.WriteLine($"[GATEWAY UNOBSERVED TASK EXCEPTION]: {e.Exception}");
+    e.SetObserved(); // Prevent process termination
+};
+
 app.Run();
 
 await AgnetaHandler.Close();
