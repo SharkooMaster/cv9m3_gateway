@@ -103,6 +103,10 @@ if (app.Environment.IsDevelopment())
 app.UseRouting();
 app.MapPrometheusScrapingEndpoint("/metrics");
 
+// Tiny pod-self-reporting endpoint pulled by the control-center every ~30 s.
+// Allocation-bounded; never touches request routing.
+Gateway.Utils.RuntimeStatsEndpoint.Map(app, "gateway");
+
 app.MapGrpcService<GreeterService>();
 app.MapGrpcService<BatchSearchService>();
 app.MapGrpcService<SearchAllService>();
