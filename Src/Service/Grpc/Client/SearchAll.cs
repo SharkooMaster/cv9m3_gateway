@@ -270,7 +270,18 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
         ret.BucketId = best.BucketId;
         ret.BucketKey = (ulong)best.BucketKey;
-        ret.Chunk = (best.Chunk != null && best.Chunk.Length > 0) ? best.Chunk : query.query.Chunk;
+        // INTEGRITY INVARIANT: ret.Chunk must always be the bytes that hash to
+        // ret.StorageGuid, never the original query chunk. The previous fallback
+        // (`?? query.query.Chunk`) silently paired cross's *query* bytes with
+        // the agent's *matched* StorageGuid, defeating cross's lazy-fetch path
+        // (which only fires when Chunk is empty) and producing 12% mismatches
+        // on IntegrityCheck:StoreRoundTrip:DedupHit followed by corrupted
+        // diff encodings in the CCF.
+        //
+        // When the agent couldn't ship matched bytes (eviction + race), leave
+        // Chunk empty — cross will lazily fetch the canonical bytes from the
+        // owning agent via GetChunkByReference using BucketId/BucketKey.
+        ret.Chunk = (best.Chunk != null && best.Chunk.Length > 0) ? best.Chunk : ByteString.Empty;
         ret.Index = best.Index;
         ret.Similarity = bestSim;
         ret.Duplicate = bestSim >= Globals.MinThresh;
