@@ -208,12 +208,13 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
 
         if (incoming.Results == null || incoming.Results.Count == 0)
         {
-            ret.BucketId = 0;
-            ret.BucketKey = 0;
+            ret.BucketId = ulong.MaxValue;
+            ret.BucketKey = ulong.MaxValue;
             ret.Chunk = query.query.Chunk;
             ret.Index = query.query.Index;
             ret.Similarity = 0.0f;
             ret.Duplicate = false;
+            ret.IsMatched = false;
             return ret;
         }
 
@@ -344,7 +345,7 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                 catch
                 {
                     foreach (var idx in idxs)
-                        results[idx] = new QueryResponseObject { BucketId = 0, BucketKey = 0, Similarity = 1.0f, Chunk = ByteString.Empty, Index = queryInfos[idx].query.Index, Duplicate = true, NeedToStore = true, TargetAgent = a };
+                        results[idx] = new QueryResponseObject { BucketId = ulong.MaxValue, BucketKey = ulong.MaxValue, Similarity = 1.0f, Chunk = ByteString.Empty, Index = queryInfos[idx].query.Index, Duplicate = true, NeedToStore = true, TargetAgent = a, IsMatched = false };
                 }
             }, context.CancellationToken));
         }
@@ -498,14 +499,15 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                         {
                             results[idx] = new QueryResponseObject
                             {
-                                BucketId = 0,
-                                BucketKey = 0,
+                                BucketId = ulong.MaxValue,
+                                BucketKey = ulong.MaxValue,
                                 Similarity = 1.0f,
                                 Chunk = ByteString.Empty,
                                 Index = queryInfos[idx].query.Index,
                                 Duplicate = true,
                                 NeedToStore = true,
-                                TargetAgent = capturedAgent
+                                TargetAgent = capturedAgent,
+                                IsMatched = false
                             };
                         }
                     }
@@ -533,14 +535,15 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
                     // Safety: if somehow a result slot was missed
                     await responseStream.WriteAsync(new QueryResponseObject
                     {
-                        BucketId = 0,
-                        BucketKey = 0,
+                        BucketId = ulong.MaxValue,
+                        BucketKey = ulong.MaxValue,
                         Similarity = 1.0f,
                         Chunk = ByteString.Empty,
                         Index = allQueries[i].Index,
                         Duplicate = true,
                         NeedToStore = true,
-                        TargetAgent = queryInfos[i].agent
+                        TargetAgent = queryInfos[i].agent,
+                        IsMatched = false
                     });
                 }
             }
@@ -568,14 +571,15 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         {
             return new QueryResponseObject
             {
-                BucketId = 0,
-                BucketKey = 0,
+                BucketId = ulong.MaxValue,
+                BucketKey = ulong.MaxValue,
                 Similarity = 1.0f,
                 Chunk = ByteString.Empty,
                 Index = queryObj.Index,
                 Duplicate = true,
                 NeedToStore = true,
-                TargetAgent = targetAgent
+                TargetAgent = targetAgent,
+                IsMatched = false
             };
         }
 
@@ -589,12 +593,17 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         if (responseObj.Similarity < Globals.MinThresh)
         {
             // Below threshold — needs storing
-            responseObj.BucketId = 0;
-            responseObj.BucketKey = 0;
+            responseObj.BucketId = ulong.MaxValue;
+            responseObj.BucketKey = ulong.MaxValue;
             responseObj.Chunk = ByteString.Empty;
             responseObj.Similarity = 1.0f;
             responseObj.Duplicate = true;
             responseObj.NeedToStore = true;
+            responseObj.IsMatched = false;
+        }
+        else
+        {
+            responseObj.IsMatched = true;
         }
 
         return responseObj;

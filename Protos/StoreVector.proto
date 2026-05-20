@@ -21,4 +21,5 @@ message StoreVector_Res
     uint64 id = 1;
     uint64 index = 2;
     string storage_guid = 3;  // SHA256 of chunk bytes — content-addressable, globally unique
+    bool success = 4;         // true = successfully stored or deduplicated, false = failure
 }
