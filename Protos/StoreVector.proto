@@ -21,5 +21,5 @@ message StoreVector_Res
     uint64 id = 1;
     uint64 index = 2;
     string storage_guid = 3;  // SHA256 of chunk bytes — content-addressable, globally unique
-    bool success = 4;         // true = successfully stored or deduplicated, false = failure
+    bool failed = 4;          // true = failure. Default false = success/dedup. Inverted from "success" so the proto3 default for a missing field is treated as success (backward-compat with older versions).
 }
