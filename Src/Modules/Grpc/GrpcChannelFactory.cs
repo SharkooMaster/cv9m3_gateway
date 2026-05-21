@@ -50,8 +50,8 @@ public static class GrpcChannelFactory
         var options = new GrpcChannelOptions
         {
             HttpHandler = handler,
-            //LoggerFactory = Globals.GRPC_OPTIONS.LoggerFactory,
-            
+            MaxReceiveMessageSize = 1000 * 1024 * 1024,
+            MaxSendMessageSize = 1000 * 1024 * 1024,
             Credentials = ChannelCredentials.Insecure
         };
 

@@ -47,7 +47,8 @@ public static class Globals
     public static GrpcChannelOptions GRPC_OPTIONS = new GrpcChannelOptions{
         HttpHandler = new SocketsHttpHandler() {
             EnableMultipleHttp2Connections = true,
-            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             KeepAlivePingDelay = TimeSpan.FromSeconds(30),
             KeepAlivePingTimeout = TimeSpan.FromSeconds(10)
         },
@@ -69,7 +70,7 @@ public static class Globals
                         InitialBackoff = TimeSpan.FromMilliseconds(100),
                         MaxBackoff = TimeSpan.FromSeconds(1),
                         BackoffMultiplier = 2,
-                        RetryableStatusCodes = { Grpc.Core.StatusCode.Unavailable, Grpc.Core.StatusCode.ResourceExhausted}
+                        RetryableStatusCodes = { Grpc.Core.StatusCode.Unavailable, Grpc.Core.StatusCode.ResourceExhausted, Grpc.Core.StatusCode.Internal}
                     }
                 }
             }
