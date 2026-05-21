@@ -25,6 +25,14 @@ public static class RendezvousRouter
     private static volatile string[] _agentIps = Array.Empty<string>();
 
     private static long _resolvedAtTicks = 0;
+    // When the last resolution succeeded fully (every IP returned a node name)
+    // we cache for 15 s. When it succeeded only partially or fell all the way
+    // back to IP-based routing we cache for a much shorter window so the next
+    // PickAgent re-resolves and picks up agents as they finish warming up,
+    // instead of locking the gateway into a stale fallback for the full 15 s.
+    private static volatile bool _lastResolutionWasFallback = false;
+    private static readonly TimeSpan FullCacheTtl = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan FallbackCacheTtl = TimeSpan.FromSeconds(2);
 
     public static string PickAgent(string bucketString)
     {
@@ -73,12 +81,14 @@ public static class RendezvousRouter
     public static string[] GetAgents()
     {
         long resolvedTicks = Interlocked.Read(ref _resolvedAtTicks);
-        if (_nodeNames.Length > 0 && (DateTime.UtcNow.Ticks - resolvedTicks) < TimeSpan.FromSeconds(15).Ticks)
+        var cacheTtl = _lastResolutionWasFallback ? FallbackCacheTtl : FullCacheTtl;
+        if (_nodeNames.Length > 0 && (DateTime.UtcNow.Ticks - resolvedTicks) < cacheTtl.Ticks)
             return _agentIps;
 
         lock (_lock)
         {
-            if (_nodeNames.Length > 0 && (DateTime.UtcNow.Ticks - _resolvedAtTicks) < TimeSpan.FromSeconds(15).Ticks)
+            cacheTtl = _lastResolutionWasFallback ? FallbackCacheTtl : FullCacheTtl;
+            if (_nodeNames.Length > 0 && (DateTime.UtcNow.Ticks - _resolvedAtTicks) < cacheTtl.Ticks)
                 return _agentIps;
 
             try
@@ -103,8 +113,15 @@ public static class RendezvousRouter
                             roundRobin: false,
                             port: 5000);
 
+                        // Was 3 s. Tight enough that any agent doing warm-up
+                        // work (RocksDB scan, bucket cache priming, GC stall
+                        // during boot) blew through it and got marked
+                        // unresolvable, dragging the gateway into the
+                        // IP-based fallback for 15 s. 8 s is well above the
+                        // p99 healthy GetNodeInfo while still bounded by the
+                        // outer Task.WaitAll.
                         var res = await client.GetAsync(new Empty(),
-                            deadline: DateTime.UtcNow.AddSeconds(3));
+                            deadline: DateTime.UtcNow.AddSeconds(8));
 
                         string nodeName = res.NodeName;
                         if (!string.IsNullOrWhiteSpace(nodeName))
@@ -117,7 +134,10 @@ public static class RendezvousRouter
                     return (nodeName: "", ip, ok: false);
                 }).ToArray();
 
-                Task.WaitAll(tasks, TimeSpan.FromSeconds(5));
+                // Outer wait must exceed the per-call deadline so a slow
+                // agent isn't silently dropped by the WaitAll racing the
+                // deadline. 12 s leaves a small buffer above 8 s.
+                Task.WaitAll(tasks, TimeSpan.FromSeconds(12));
 
                 foreach (var t in tasks)
                 {
@@ -127,13 +147,17 @@ public static class RendezvousRouter
 
                 if (newNodeToIp.Count == 0)
                 {
-                    // Fallback to IP-based routing (agents might not have GetNodeInfo yet)
-                    Console.WriteLine($"[RendezvousRouter] WARNING: GetNodeInfo failed for all agents. Falling back to IP-based routing.");
+                    // Fallback to IP-based routing (agents might not have GetNodeInfo yet).
+                    // Marked as fallback so the cache TTL drops to FallbackCacheTtl —
+                    // we want to re-probe agents as soon as the next request arrives
+                    // so routing repairs itself within seconds, not 15 s.
+                    Console.WriteLine($"[RendezvousRouter] WARNING: GetNodeInfo failed for all agents. Falling back to IP-based routing (will re-probe in {FallbackCacheTtl.TotalSeconds}s).");
                     var sortedIps = resolvedIps.OrderBy(x => x, StringComparer.Ordinal).ToArray();
                     _nodeNames = sortedIps;
                     _nodeNameBytes = sortedIps.Select(a => Encoding.UTF8.GetBytes(a)).ToArray();
                     _nodeToIp = sortedIps.ToDictionary(ip => ip, ip => ip);
                     _agentIps = sortedIps;
+                    _lastResolutionWasFallback = true;
                     Interlocked.Exchange(ref _resolvedAtTicks, DateTime.UtcNow.Ticks);
                     return _agentIps;
                 }
@@ -145,6 +169,10 @@ public static class RendezvousRouter
                 _nodeNames = sortedNodeNames;
                 _nodeToIp = newNodeToIp;
                 _agentIps = newNodeToIp.Values.ToArray();
+                // A "partial" success (some agents responded, others didn't) is also
+                // treated as a fallback so we re-probe quickly and pick up the rest as
+                // they become responsive, keeping rendezvous routing complete.
+                _lastResolutionWasFallback = newNodeToIp.Count != resolvedIps.Length;
                 Interlocked.Exchange(ref _resolvedAtTicks, DateTime.UtcNow.Ticks);
 
                 if (changed)
