@@ -2,9 +2,18 @@ syntax = "proto3";
 
 import "google/protobuf/empty.proto";
 
+// Wire contract for the agent's StoreVector service.
+// MUST stay byte-for-byte identical to agent/Protos/StoreVector.proto and
+// cross/Protos/Agent/StoreVector.proto. Any drift between these three files
+// causes silent wire-level field aliasing (e.g. agent sends was_deduplicated
+// on field 4, peer with mismatched proto reads it as `failed`). This file
+// previously redefined field 4 as `failed` and was missing fields 5-7 and the
+// BatchStore RPC, which made every successful gateway→agent dedup look like
+// a Store failure on the gateway side.
 service StoreVector
 {
     rpc Store (StoreVector_Req) returns (StoreVector_Res);
+    rpc BatchStore (BatchStoreVector_Req) returns (BatchStoreVector_Res);
 }
 
 message StoreVector_Req
@@ -21,5 +30,18 @@ message StoreVector_Res
     uint64 id = 1;
     uint64 index = 2;
     string storage_guid = 3;  // SHA256 of chunk bytes — content-addressable, globally unique
-    bool failed = 4;          // true = failure. Default false = success/dedup. Inverted from "success" so the proto3 default for a missing field is treated as success (backward-compat with older versions).
+    bool was_deduplicated = 4; // true = matched existing chunk in bucket (not stored fresh)
+    bytes base_chunk = 5;      // populated when was_deduplicated: base chunk bytes for diff encoding
+    float similarity = 6;      // cosine similarity to matched entry (only when was_deduplicated)
+    bool failed = 7;           // true = failure. Default false = success/dedup. Inverted from "success" so the proto3 default for a missing field is treated as success (backward-compat with older agents).
+}
+
+message BatchStoreVector_Req
+{
+    repeated StoreVector_Req items = 1;
+}
+
+message BatchStoreVector_Res
+{
+    repeated StoreVector_Res results = 1;
 }

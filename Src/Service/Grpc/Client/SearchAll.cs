@@ -351,36 +351,34 @@ public class SearchAllService : GatewayService.GatewayService.GatewayServiceBase
         }
         await Task.WhenAll(tasks);
 
-        // Store any chunks that need storing
-        var storeTasks = new List<Task>();
+        // CONTRACT: this handler does NOT store fresh chunks. The proto explicitly
+        // documents that storing is the caller's (cross's) responsibility — see
+        // `bool need_to_store = 7; // OPTIMIZATION: Gateway indicates chunk needs
+        // storing (Cross will handle it)` in SearchAll.proto.
+        //
+        // The previous implementation here issued a synchronous `Globals.svec.Store`
+        // for every NeedToStore=true row, wrapped in `Task.FromResult(...)` (which
+        // is a no-op around the *blocking* gRPC call). Two consequences:
+        //   1. Double-store: cross's V7 BatchStore path runs after this handler
+        //      and stores every fresh chunk a second time. Agent dedup catches it
+        //      but the agents pay 2× the RocksDB write cost per file, which was
+        //      saturating them and producing the gateway→agent DeadlineExceeded
+        //      cascade.
+        //   2. Threadpool starvation: the synchronous Store calls were running on
+        //      Task.Run threads, so 1000-fanout fresh-stores blocked 1000 threadpool
+        //      workers waiting on agent gRPC. RendezvousRouter's GetNodeInfo calls
+        //      (which run on the same threadpool) then missed their deadline,
+        //      reproducing the "gateway won't start" symptom.
+        //
+        // Cross owns the canonical BatchStore path (with retry, bloat-guard and
+        // round-trip integrity checks); the gateway must only return search
+        // results plus the routing hint (TargetAgent + NeedToStore=true).
         for (int i = 0; i < results.Length; i++)
         {
             var r = results[i];
             if (r == null) continue;
-            if (!r.NeedToStore) { response.Results.Add(r); continue; }
-
-            var idx = i;
-            storeTasks.Add(Task.Run(async () =>
-            {
-                try
-                {
-                    var info = queryInfos[idx];
-                    var storeReq = new StoreVector_Req { TargetIp = r.TargetAgent, Bitstring = info.query.BucketString, HeadRouteID = "" };
-                    storeReq.Vector.AddRange(info.query.Vector);
-                    if (info.query.Chunk != null && info.query.Chunk.Length > 0)
-                        storeReq.Chunk = info.query.Chunk;
-                    else return;
-                    var storeRes = await Task.FromResult(Globals.svec.Store(storeReq));
-                    r.BucketId = storeRes.Id;
-                    r.BucketKey = storeRes.Index;
-                    r.StorageGuid = storeRes.StorageGuid ?? "";
-                }
-                catch { /* Continue — chunk may already be stored */ }
-            }));
             response.Results.Add(r);
         }
-        if (storeTasks.Count > 0)
-            await Task.WhenAll(storeTasks);
 
         return response;
     }
