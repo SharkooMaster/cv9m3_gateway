@@ -6,6 +6,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!-- Gateway.Tests lives under this project's directory tree, so the SDK
+       glob picks up its bin/obj artifacts and produces "duplicate
+       AssemblyInfo" errors. Excluding the test project's source and
+       generated artifacts makes the build deterministic regardless of
+       whether Gateway.Tests has been built before. -->
+  <ItemGroup>
+    <Compile Remove="Gateway.Tests/**/*.cs" />
+    <Content Remove="Gateway.Tests/**" />
+    <None Remove="Gateway.Tests/**" />
+    <EmbeddedResource Remove="Gateway.Tests/**" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="dotnet-etcd" Version="7.1.1" />
     <PackageReference Include="Google.Cloud.Storage.V1" Version="4.13.0" />
@@ -47,6 +59,7 @@
     <Protobuf Include="Protos\SearchVector.proto" GrpcServices="Client" />
     <Protobuf Include="Protos\StoreVector.proto" GrpcServices="Client" />
     <Protobuf Include="Protos\GetNodeInfo.proto" GrpcServices="Client" />
+    <Protobuf Include="Protos\StreamVnodeData.proto" GrpcServices="Client" />
   </ItemGroup>
 
   <PropertyGroup>

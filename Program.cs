@@ -81,6 +81,24 @@ builder.Services.AddSwaggerGen();
 // builder.Services.AddHostedService<GatewayLifeCycleService>();
 // builder.Services.AddHostedService<GatewayRuntimeService>();
 
+// EtcdMembershipWatcher subscribes to /agents/ in etcd and pushes the
+// resulting ConsistentHashRing into RingState. Keeping this in sync with
+// cross's watcher is what guarantees that gateway and cross pick the
+// same R replicas for a given key — without it, a write batch could be
+// fanned out to one set of agents by gateway while cross expects a
+// different set, breaking write quorum.
+builder.Services.AddHostedService<Gateway.Utilities.EtcdMembershipWatcher>();
+
+// RebalanceCoordinator watches RingState for topology changes and
+// orchestrates vnode handoffs (BeginVnodeAdoption RPCs to newly-joined
+// agents). Disabled by default — set REBALANCE_COORDINATOR_ENABLED=true
+// to opt in. Intended for exactly one gateway pod at a time; we keep
+// this lightweight enough that running multiple is safe (the
+// determinism in HandleTopologyChange means duplicate dispatches just
+// re-confirm the same handoff; the dst agent's adoption_id de-dup
+// prevents double-streaming).
+builder.Services.AddHostedService<Gateway.Services.RebalanceCoordinator>();
+
 var app = builder.Build();
 
 var clmsClientService = app.Services.GetRequiredService<ClmsClientService>();

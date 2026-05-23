@@ -82,8 +82,26 @@ public static class RuntimeStatsEndpoint
 
                 grpc_channel_cache_count = GrpcChannelFactory.ChannelCacheCount,
                 grpc_client_cache_count  = GrpcChannelFactory.ClientCacheCount,
+
+                // ── Replication health (Phase 7) ──
+                // Reads RingState directly so the values are guaranteed
+                // to match what every PickReplicas call sees right now.
+                ring_size           = Gateway.Routing.RingState.Current.Agents.Count,
+                topology_version    = Gateway.Routing.RingState.TopologyVersion,
+                vnodes_per_agent    = Gateway.Routing.RingState.Current.VnodesPerAgent,
+                replication_factor  = ParseEnvInt("REPLICATION_FACTOR", 3),
+                write_quorum        = ParseEnvInt("WRITE_QUORUM", 2),
+                rebalance_coordinator_enabled =
+                    string.Equals(System.Environment.GetEnvironmentVariable("REBALANCE_COORDINATOR_ENABLED"),
+                        "true", System.StringComparison.OrdinalIgnoreCase),
             });
         });
+    }
+
+    private static int ParseEnvInt(string name, int fallback)
+    {
+        var raw = System.Environment.GetEnvironmentVariable(name);
+        return int.TryParse(raw, out var v) && v > 0 ? v : fallback;
     }
 
     private static int TryReadOpenFdCount()
