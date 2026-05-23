@@ -14,6 +14,12 @@ public static class GrpcChannelFactory
       = new ConcurrentDictionary<string, GrpcChannel>();
 
     /// <summary>
+    /// Number of cached gRPC channels. Monotonic growth here in steady-state
+    /// indicates a channel leak (commonly from agent pod-IP churn).
+    /// </summary>
+    public static int ChannelCacheCount => _channels.Count;
+
+    /// <summary>
     /// Gets (or creates) a normal single‑endpoint channel.
     /// </summary>
     public static GrpcChannel GetChannel(string ipOrHost, int port = 5000)
@@ -85,6 +91,9 @@ public static class GrpcChannelFactory
     /// </summary>
     private static readonly ConcurrentDictionary<string, object> _clients
       = new ConcurrentDictionary<string, object>();
+
+    /// <summary>Number of cached typed-client stubs (≈ stub-type × target).</summary>
+    public static int ClientCacheCount => _clients.Count;
 
     public static TClient GetClient<TClient>(
         string target,
