@@ -137,6 +137,47 @@ app.MapGet("/", () =>
     return "Hello world";
 });
 
+// ── Drain status endpoint (HPA-safe scale-down) ─────────────────────
+// Polled by an agent's preStop hook (POST /admin/retire on the agent
+// kicks off the drain and then polls this endpoint) to decide when
+// the pod is safe to terminate.
+//
+// Returns a snapshot of the RetirementTracker for the named pod:
+//   { pod, total, pending, completed, failed, complete, started_utc,
+//     last_update_utc, reason }
+//
+// Semantics:
+//   - complete=true means every adoption dispatched against the pod
+//     has reached a terminal state (COMPLETED or FAILED).
+//   - When the pod isn't tracked at all (e.g. ring was already empty
+//     or this gateway never observed the drain), we return
+//     complete=true, reason="not tracked" so the agent can proceed
+//     instead of blocking forever.
+//
+// Authentication: none. Cluster-internal only — exposed on the same
+// HTTP port as /stats/runtime, which is already cluster-internal.
+app.MapGet("/admin/retirement-status", (HttpContext ctx) =>
+{
+    var pod = ctx.Request.Query["pod"].ToString();
+    if (string.IsNullOrEmpty(pod))
+    {
+        return Results.BadRequest(new { error = "missing pod query parameter" });
+    }
+    var snapshot = Gateway.Services.RetirementTracker.GetStatus(pod);
+    return Results.Json(new
+    {
+        pod = snapshot.Pod,
+        total = snapshot.Total,
+        pending = snapshot.Pending,
+        completed = snapshot.Completed,
+        failed = snapshot.Failed,
+        complete = snapshot.Complete,
+        started_utc = snapshot.StartedUtc,
+        last_update_utc = snapshot.LastUpdateUtc,
+        reason = snapshot.Reason
+    });
+});
+
 PushoverHandler.PushNotification($"Gateway:{Globals.GATEWAY_ID}: Running");
 
 // PRE-WARM CONNECTIONS: Establish gRPC channels to agents at startup
